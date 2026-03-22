@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>挂起任务工作流使用指南</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background: #f5f5f5;
+            padding: 20px;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            background: #fff;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            padding: 40px;
+        }
+        h1 {
+            color: #1a73e8;
+            font-size: 28px;
+            margin-bottom: 10px;
+            padding-bottom: 15px;
+            border-bottom: 2px solid #1a73e8;
+        }
+        h2 {
+            color: #202124;
+            font-size: 20px;
+            margin: 30px 0 15px;
+            padding-left: 10px;
+            border-left: 4px solid #1a73e8;
+        }
+        h3 {
+            color: #444;
+            font-size: 16px;
+            margin: 20px 0 10px;
+        }
+        p {
+            margin-bottom: 10px;
+        }
+        code {
+            background: #f8f9fa;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 14px;
+            color: #d63384;
+        }
+        pre {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 15px;
+            border-radius: 6px;
+            overflow-x: auto;
+            margin: 10px 0;
+            font-size: 13px;
+            line-height: 1.5;
+        }
+        pre code {
+            background: none;
+            padding: 0;
+            color: inherit;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 15px 0;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 10px 12px;
+            text-align: left;
+        }
+        th {
+            background: #f8f9fa;
+            font-weight: 600;
+            color: #444;
+        }
+        tr:hover {
+            background: #f8f9fa;
+        }
+        .badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+            margin-right: 5px;
+        }
+        .badge-success { background: #d4edda; color: #155724; }
+        .badge-warning { background: #fff3cd; color: #856404; }
+        .badge-info { background: #d1ecf1; color: #0c5460; }
+        .badge-danger { background: #f8d7da; color: #721c24; }
+        ul, ol {
+            margin: 10px 0 10px 20px;
+        }
+        li {
+            margin-bottom: 8px;
+        }
+        .flow-chart {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 15px 0;
+        }
+        .flow-stage {
+            margin-bottom: 20px;
+        }
+        .flow-stage-title {
+            font-weight: 600;
+            color: #1a73e8;
+            margin-bottom: 10px;
+        }
+        .flow-step {
+            display: inline-block;
+            background: #fff;
+            border: 2px solid #1a73e8;
+            border-radius: 6px;
+            padding: 8px 16px;
+            margin: 5px;
+            font-size: 14px;
+        }
+        .flow-arrow {
+            color: #666;
+            font-size: 20px;
+            vertical-align: middle;
+        }
+        .route-card {
+            background: #fff;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 10px 0;
+        }
+        .route-title {
+            font-weight: 600;
+            color: #1a73e8;
+            margin-bottom: 8px;
+        }
+        .route-code {
+            background: #f0f0f0;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        .info-box {
+            background: #e7f3ff;
+            border-left: 4px solid #1a73e8;
+            padding: 12px 15px;
+            margin: 15px 0;
+            border-radius: 0 4px 4px 0;
+        }
+        .warning-box {
+            background: #fff3e0;
+            border-left: 4px solid #ff9800;
+            padding: 12px 15px;
+            margin: 15px 0;
+            border-radius: 0 4px 4px 0;
+        }
+        .success-box {
+            background: #e8f5e9;
+            border-left: 4px solid #4caf50;
+            padding: 12px 15px;
+            margin: 15px 0;
+            border-radius: 0 4px 4px 0;
+        }
+        footer {
+            text-align: center;
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 1px solid #eee;
+            color: #666;
+            font-size: 14px;
+        }
+        .version {
+            color: #1a73e8;
+            font-weight: 600;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📋 挂起任务工作流使用指南</h1>
+        <p><strong>基于 Lobster 工作流引擎</strong> | <span class="version">版本：1.0</span> | 创建时间：2026-03-16</p>
+
+        <div class="info-box">
+            <strong>📌 状态：</strong> <span class="badge badge-success">已完成</span> | <span class="badge badge-warning">待测试</span>
+        </div>
+
+        <h2>🚀 快速开始</h2>
+
+        <h3>1. 启用 Lobster 工具</h3>
+        <p>在 OpenClaw 配置中添加：</p>
+        <pre><code>{
+  "tools": {
+    "alsoAllow": ["lobster", "llm-task"]
+  }
+}</code></pre>
+
+        <h3>2. 安装 Lobster CLI</h3>
+        <p>确保 <code>lobster</code> 命令在 PATH 中：</p>
+        <pre><code># 检查是否已安装
+which lobster
+
+# 如果未安装，参考 https://github.com/openclaw/lobster</code></pre>
+
+        <h2>📁 工作流文件</h2>
+        <table>
+            <tr>
+                <th>文件位置</th>
+                <td>~/.openclaw/agents/main/workspace/workflows/hangqi-task-workflow.lobster</td>
+            </tr>
+            <tr>
+                <th>运行命令</th>
+                <td>lobster run --mode tool &lt;workflow&gt; --args-json '{}'</td>
+            </tr>
+        </table>
+
+        <h2>📝 工作流参数</h2>
+        <table>
+            <tr>
+                <th>参数</th>
+                <th>类型</th>
+                <th>必填</th>
+                <th>说明</th>
+                <th>示例</th>
+            </tr>
+            <tr>
+                <td>task_id</td>
+                <td>string</td>
+                <td>✅</td>
+                <td>任务 ID</td>
+                <td>T001</td>
+            </tr>
+            <tr>
+                <td>work_order_id</td>
+                <td>string</td>
+                <td>✅</td>
+                <td>工单号</td>
+                <td>WO123</td>
+            </tr>
+            <tr>
+                <td>audio_ref</td>
+                <td>string</td>
+                <td>✅</td>
+                <td>录音引用 ID</td>
+                <td>audio_456</td>
+            </tr>
+            <tr>
+                <td>confidence_threshold</td>
+                <td>number</td>
+                <td>❌</td>
+                <td>置信度阈值（默认 0.75）</td>
+                <td>0.75</td>
+            </tr>
+        </table>
+
+        <h2>🔄 工作流执行流程</h2>
+        <div class="flow-chart">
+            <div class="flow-stage">
+                <div class="flow-stage-title">阶段 A：理解与路由</div>
+                <span class="flow-step">Skill 1: 获取录音</span>
+                <span class="flow-arrow">→</span>
+                <span class="flow-step">Skill 2: 意图识别</span>
+                <span class="flow-arrow">→</span>
+                <span class="flow-step">Skill 3: 结果路由</span>
+            </div>
+            <div class="flow-stage">
+                <div class="flow-stage-title">阶段 B：跟单与执行</div>
+                <span class="flow-step">Skill 4: 跟单处理</span>
+                <span class="flow-arrow">→</span>
+                <span class="flow-step">Skill 5: 业务执行</span>
+                <span class="flow-arrow">→</span>
+                <span class="flow-step">审批确认</span>
+                <span class="flow-arrow">→</span>
+                <span class="flow-step">任务归档</span>
+            </div>
+        </div>
+
+        <h2>🛤️ 3 条路由路径</h2>
+
+        <div class="route-card">
+            <div class="route-title">路由 1：确认上门</div>
+            <p><span class="route-code">route_type: confirm_visit</span></p>
+            <p><strong>动作：</strong>工单改约 → 新预约时间 = 当前日期 + 2 天 09:00</p>
+            <p><strong>需要审批：</strong>否 | <strong>执行模式：</strong>自动</p>
+            <p><strong>最终状态：</strong>待履约</p>
+        </div>
+
+        <div class="route-card">
+            <div class="route-title">路由 2：用户询价/取消</div>
+            <p><span class="route-code">route_type: price_or_cancel</span></p>
+            <p><strong>动作：</strong>工单取消 → 取消原因：用户不需要了</p>
+            <p><strong>需要审批：</strong>是（客服主管） | <strong>执行模式：</strong>人工</p>
+            <p><strong>最终状态：</strong>待取消审批</p>
+        </div>
+
+        <div class="route-card">
+            <div class="route-title">路由 3：其他意图</div>
+            <p><span class="route-code">route_type: other</span></p>
+            <p><strong>动作：</strong>创建跟单任务 → 任务类型：挂起跟单</p>
+            <p><strong>需要审批：</strong>否 | <strong>执行模式：</strong>自动</p>
+            <p><strong>最终状态：</strong>待后续跟进</p>
+        </div>
+
+        <h2>⚠️ 异常处理</h2>
+        <table>
+            <tr>
+                <th>场景</th>
+                <th>触发条件</th>
+                <th>处理方式</th>
+                <th>最终状态</th>
+            </tr>
+            <tr>
+                <td>录音获取失败</td>
+                <td>录音不存在、拉取失败、文件损坏</td>
+                <td>标记 need_human_review=true，跳过后续 Skills</td>
+                <td>HUMAN_REVIEW</td>
+            </tr>
+            <tr>
+                <td>意图识别低置信度</td>
+                <td>confidence &lt; 0.75</td>
+                <td>标记 need_human_review=true，execution_mode=manual</td>
+                <td>HUMAN_REVIEW</td>
+            </tr>
+            <tr>
+                <td>工单取消审批</td>
+                <td>route_type = price_or_cancel</td>
+                <td>生成取消动作，need_approval=true，等待审批</td>
+                <td>WAIT_APPROVAL</td>
+            </tr>
+        </table>
+
+        <h2>📊 监控指标</h2>
+        <table>
+            <tr>
+                <th>指标</th>
+                <th>目标值</th>
+                <th>告警阈值</th>
+            </tr>
+            <tr>
+                <td>录音获取成功率</td>
+                <td>≥ 95%</td>
+                <td>&lt; 90%</td>
+            </tr>
+            <tr>
+                <td>意图识别准确率</td>
+                <td>≥ 90%</td>
+                <td>&lt; 85%</td>
+            </tr>
+            <tr>
+                <td>自动执行成功率</td>
+                <td>≥ 95%</td>
+                <td>&lt; 90%</td>
+            </tr>
+            <tr>
+                <td>人工复核率</td>
+                <td>≤ 15%</td>
+                <td>&gt; 20%</td>
+            </tr>
+            <tr>
+                <td>平均处理时长</td>
+                <td>&lt; 2 分钟</td>
+                <td>&gt; 5 分钟</td>
+            </tr>
+        </table>
+
+        <h2>🔧 调试技巧</h2>
+
+        <h3>1. 单步执行</h3>
+        <pre><code>lobster run --mode tool hangqi-task-workflow.lobster \
+  --args-json '{"task_id":"T001","work_order_id":"WO123","audio_ref":"audio_456"}' \
+  --stop-after skill1_fetch_audio</code></pre>
+
+        <h3>2. 查看中间结果</h3>
+        <pre><code>lobster run --mode tool hangqi-task-workflow.lobster \
+  --args-json '{"task_id":"T001"}' \
+  --verbose</code></pre>
+
+        <h3>3. 模拟测试</h3>
+        <pre><code>lobster run --mode tool hangqi-task-workflow.lobster \
+  --args-json '{"task_id":"TEST001","work_order_id":"TEST_WO","audio_ref":"test_audio"}' \
+  --dry-run</code></pre>
+
+        <h2>📚 相关文档</h2>
+        <ul>
+            <li><a href="https://qcnvm7ba2fd9.feishu.cn/wiki/DNzIwJLL3iuRPfkGHUSc5bZ8n1c" target="_blank">G1 工作流程文档</a></li>
+            <li><a href="https://github.com/openclaw/lobster" target="_blank">Lobster 官方文档</a></li>
+            <li><a href="https://docs.openclaw.ai/tools/lobster" target="_blank">OpenClaw Lobster 工具文档</a></li>
+        </ul>
+
+        <footer>
+            <p>文档状态：✅ 已完成 | 工作流状态：⏳ 待测试</p>
+            <p>版本：1.0 | 日期：2026-03-16</p>
+        </footer>
+    </div>
+</body>
+</html>

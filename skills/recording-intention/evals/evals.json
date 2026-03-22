@@ -1,0 +1,41 @@
+{
+  "skill_name": "recording-intention",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "分析这个录音文件的意图：https://example.com/call-recording-001.mp3",
+      "expected_output": "调用API分析录音，返回包含意图类别、置信度和推理过程的结构化结果",
+      "files": [],
+      "expectations": [
+        "成功调用 workflow API 并传递 recording 参数",
+        "正确设置 Authorization header 为 Bearer x76utyhsqdtirjcpp12sp9n2",
+        "返回结果包含意图类别（category）和置信度（confidence）",
+        "输出包含关键证据和推理过程"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "判断这段客服通话的意图，录音地址是 https://storage.company.com/audio/2026-03-18/customer-service-call.wav",
+      "expected_output": "调用API分析录音，返回意图识别结果",
+      "files": [],
+      "expectations": [
+        "从用户输入中提取录音URL",
+        "构造正确的API请求体包含inputs.recording字段",
+        "解析API返回的run_result字段中的JSON内容",
+        "以清晰格式展示意图分析结果"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "识别这个录音文件的用户意图：/Users/zmnmini/recordings/sample-call.mp3",
+      "expected_output": "调用API分析本地录音文件路径，返回意图识别结果",
+      "files": [],
+      "expectations": [
+        "支持本地文件路径作为recording参数",
+        "正确处理dataMap参数（使用默认值或用户提供的值）",
+        "处理API响应并提取意图分析数据",
+        "如果API调用失败，提供有意义的错误信息"
+      ]
+    }
+  ]
+}
