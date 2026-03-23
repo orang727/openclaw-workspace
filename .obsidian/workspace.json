@@ -1,0 +1,226 @@
+{
+  "main": {
+    "id": "95e115c233f136fb",
+    "type": "split",
+    "children": [
+      {
+        "id": "7dbeaff67f8bf6a5",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "822f016d86915557",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "workspace/skills/modify-duty-time/SKILL.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "SKILL"
+            }
+          },
+          {
+            "id": "9d2b441e8b9e1ccc",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "workspace/skills/call-record-query/SKILL.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "SKILL"
+            }
+          }
+        ],
+        "currentTab": 1
+      }
+    ],
+    "direction": "vertical"
+  },
+  "left": {
+    "id": "29850acdaaa6bed6",
+    "type": "split",
+    "children": [
+      {
+        "id": "cc8c2dbaf4fcc7d6",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "fd01f7035978d75e",
+            "type": "leaf",
+            "state": {
+              "type": "file-explorer",
+              "state": {
+                "sortOrder": "alphabetical",
+                "autoReveal": false
+              },
+              "icon": "lucide-folder-closed",
+              "title": "文件列表"
+            }
+          },
+          {
+            "id": "15a4b9203509ebed",
+            "type": "leaf",
+            "state": {
+              "type": "search",
+              "state": {
+                "query": "",
+                "matchingCase": false,
+                "explainSearch": false,
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical"
+              },
+              "icon": "lucide-search",
+              "title": "搜索"
+            }
+          },
+          {
+            "id": "550b4e62d7015232",
+            "type": "leaf",
+            "state": {
+              "type": "bookmarks",
+              "state": {},
+              "icon": "lucide-bookmark",
+              "title": "书签"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 226.5
+  },
+  "right": {
+    "id": "c393b89b1867c679",
+    "type": "split",
+    "children": [
+      {
+        "id": "89af7620062c9568",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "44cae91a85e6ffe6",
+            "type": "leaf",
+            "state": {
+              "type": "backlink",
+              "state": {
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical",
+                "showSearch": false,
+                "searchQuery": "",
+                "backlinkCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-coming-in",
+              "title": "反向链接"
+            }
+          },
+          {
+            "id": "43c6b00adacee2c8",
+            "type": "leaf",
+            "state": {
+              "type": "outgoing-link",
+              "state": {
+                "linksCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-going-out",
+              "title": "出链"
+            }
+          },
+          {
+            "id": "202e7460512d1d83",
+            "type": "leaf",
+            "state": {
+              "type": "tag",
+              "state": {
+                "sortOrder": "frequency",
+                "useHierarchy": true,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-tags",
+              "title": "标签"
+            }
+          },
+          {
+            "id": "9364a11c4d35f31b",
+            "type": "leaf",
+            "state": {
+              "type": "all-properties",
+              "state": {
+                "sortOrder": "frequency",
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-archive",
+              "title": "添加笔记属性"
+            }
+          },
+          {
+            "id": "c908312cafba1e68",
+            "type": "leaf",
+            "state": {
+              "type": "outline",
+              "state": {
+                "followCursor": false,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-list",
+              "title": "大纲"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300,
+    "collapsed": true
+  },
+  "left-ribbon": {
+    "hiddenItems": {
+      "switcher:打开快速切换": false,
+      "graph:查看关系图谱": false,
+      "canvas:新建白板": false,
+      "daily-notes:打开/创建今天的日记": false,
+      "templates:插入模板": false,
+      "command-palette:打开命令面板": false,
+      "bases:新建数据库": false
+    }
+  },
+  "active": "9d2b441e8b9e1ccc",
+  "lastOpenFiles": [
+    "agents/main/sessions/9b8e0e70-da7a-4803-a86f-beabac9195cf.jsonl.lock",
+    "agents/main/sessions/sessions.json.lock",
+    "agents/main/sessions/bfb77614-61fe-41be-a4ab-0994f8c142e8.jsonl.lock",
+    "exec-approvals.json",
+    "agents/main/sessions/sessions.json.0a03c949-ac4a-4770-a233-c3a9cf46c84f.tmp",
+    "skills/create-track-task/index.js",
+    "skills/create-track-task",
+    "skills/cancel-work/index.js",
+    "skills/cancel-work",
+    "skills/modify-duty-time/index.js",
+    "skills/modify-duty-time",
+    "workspace/intention-post-processing/README.md",
+    "workspace/skills/recording-intention/SKILL.md",
+    "workspace/skills/call-record-query/SKILL.md",
+    "workspace/skills/track-list-query/SKILL.md",
+    "workspace/skills/handle-track-work/SKILL.md",
+    "workspace/skills/modify-duty-time/SKILL.md",
+    "workspace/skills/create-track-task/SKILL.md",
+    "workspace/MEMORY.md",
+    "xiujiadian.md",
+    "workspace/skills/cancel-work/SKILL.md",
+    "workspace/memory/2026-03-22.md",
+    "未命名 1.canvas",
+    "未命名.canvas",
+    "workspace/skills/get-call-record/SKILL.md"
+  ]
+}

@@ -1,0 +1,36 @@
+# Node modules
+node_modules/
+
+# Logs
+*.log
+logs/
+
+# Temp files
+*.tmp
+*.temp
+.cache/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Local configs with secrets
+.auth
+*.local.json
+gateway.lock
+*.lock
+
+# Archives (large)
+workflows/archives/
+archives/
+
+# Canvas files
+canvas/
+
+# Sessions
+sessions/
+*.jsonl
+
+# Temporary
+tmp/
+temp/
