@@ -6,28 +6,17 @@ authContent.split('\n').forEach(line => {
   if (idx > 0) authConfig[line.substring(0, idx).trim()] = line.substring(idx + 1).trim();
 });
 
-const trackWorkId = '127212582539728512';
-
+const trackWorkId = '127320898734233217';
+// 尝试不同的请求参数
 fetch('https://test3-track.xiujiadian.com/amis/track/list', {
   method: 'POST',
   headers: {
     'Content-Type': 'application/json',
     'Authorization': 'Bearer ' + authConfig.AK
   },
-  body: JSON.stringify({ trackWorkId })
-}).then(r => r.text()).then(text => {
-  console.log('RAW_RESPONSE:', text);
-  // 尝试解析 JSON
-  try {
-    const d = JSON.parse(text);
-    if (d.status === 0 && d.data && d.data.items && d.data.items.length > 0) {
-      const workId = d.data.items[0].workId;
-      console.log('WORK_ID=' + workId);
-    } else {
-      console.log('ERROR: 未找到该跟单ID对应的工单，msg=' + (d.msg || ''));
-    }
-  } catch(e) {
-    // 如果不是 JSON，可能是 XML 或其他格式
-    console.log('PARSE_ERROR:', e.message);
-  }
+  body: JSON.stringify({
+    trackWorkId: parseInt(trackWorkId)
+  })
+}).then(r => r.json()).then(d => {
+  console.log(JSON.stringify(d, null, 2));
 }).catch(e => console.log('ERROR: ' + e.message));

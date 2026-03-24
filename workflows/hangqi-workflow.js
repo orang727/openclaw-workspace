@@ -10,7 +10,7 @@ const http = require('http');
 // ==================== 配置 ====================
 const GATEWAY_URL = 'http://localhost:18789';
 const TOKEN = '64a4ffec94093067b0fb0927527cffdb3e4e51cd15a46083';
-const SKILLS_DIR = 'C:/Users/admin/.openclaw/workspace/SKILLS';
+const SKILLS_DIR = 'C:/Users/admin/.openclaw/workspace/skills';
 
 // ==================== 执行日志系统 ====================
 const executionLogs = [];
@@ -54,7 +54,12 @@ function printSummary(success, failAt, failReason, steps) {
     }[log.category] || '📝';
     console.log(`  ${idx + 1}. ${icon} [${log.category}] ${log.message}`);
     if (log.details) {
-      console.log(`      ${JSON.stringify(log.details).substring(0, 200)}...`);
+      const detailsStr = JSON.stringify(log.details);
+      if (detailsStr.length > 300) {
+        console.log(`      ${detailsStr.substring(0, 300)}...`);
+      } else {
+        console.log(`      ${detailsStr}`);
+      }
     }
   });
   
@@ -145,81 +150,86 @@ async function skill1_getCallRecord(trackWorkId) {
     throw new Error('认证配置加载失败');
   }
 
-  // Step 1: 查询工单号
-  const listRequestBody = { trackWorkId };
-  addLog('REQUEST', '查询工单号', { 
-    url: 'https://test3-track.xiujiadian.com/amis/track/list',
-    body: listRequestBody
-  });
+  try {
+    // Step 1: 查询工单号
+    const listRequestBody = { trackWorkId };
+    addLog('REQUEST', '查询工单号', { 
+      url: 'https://test3-track.xiujiadian.com/amis/track/list',
+      body: listRequestBody
+    });
 
-  const listRes = await fetch('https://test3-track.xiujiadian.com/amis/track/list', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': 'Bearer ' + authConfig.AK
-    },
-    body: JSON.stringify(listRequestBody)
-  });
+    const listRes = await fetch('https://test3-track.xiujiadian.com/amis/track/list', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + authConfig.AK
+      },
+      body: JSON.stringify(listRequestBody)
+    });
 
-  const listXml = await listRes.text();
-  addLog('RESPONSE', '工单号查询响应', { xml: listXml.substring(0, 500) });
+    const listXml = await listRes.text();
+    addLog('RESPONSE', '工单号查询响应', { xml: listXml.substring(0, 500) });
 
-  const workIdMatch = listXml.match(/<workId>(\d+)<\/workId>/);
-  
-  if (!workIdMatch) {
-    addLog('ERROR', '未找到工单号');
-    return { need_human_review: true, workId: null };
-  }
-  
-  const workId = workIdMatch[1];
-  addLog('INFO', `找到工单号: ${workId}`);
-
-  // Step 2: 查询通话录音
-  addLog('REQUEST', '查询通话录音', { 
-    url: `https://test3-admin.xiujiadian.com/bfm-serv-work/serv/work/listCallRecord?servWorkId=${workId}`
-  });
-
-  const recordRes = await fetch(`https://test3-admin.xiujiadian.com/bfm-serv-work/serv/work/listCallRecord?servWorkId=${workId}`, {
-    method: 'GET',
-    headers: {
-      'Authorization': 'Bearer ' + authConfig.AK
+    const workIdMatch = listXml.match(/<workId>(\d+)<\/workId>/);
+    
+    if (!workIdMatch) {
+      addLog('ERROR', '未找到工单号', { response: listXml.substring(0, 200) });
+      return { need_human_review: true, workId: null };
     }
-  });
+    
+    const workId = workIdMatch[1];
+    addLog('INFO', `找到工单号: ${workId}`);
 
-  const recordJson = await recordRes.json();
-  addLog('RESPONSE', '通话录音查询响应', recordJson);
-  
-  if (recordJson.status !== 0 || !recordJson.data || recordJson.data.length === 0) {
-    addLog('ERROR', '无通话记录');
-    return { workId, need_human_review: true };
+    // Step 2: 查询通话录音
+    addLog('REQUEST', '查询通话录音', { 
+      url: `https://test3-admin.xiujiadian.com/bfm-serv-work/serv/work/listCallRecord?servWorkId=${workId}`
+    });
+
+    const recordRes = await fetch(`https://test3-admin.xiujiadian.com/bfm-serv-work/serv/work/listCallRecord?servWorkId=${workId}`, {
+      method: 'GET',
+      headers: {
+        'Authorization': 'Bearer ' + authConfig.AK
+      }
+    });
+
+    const recordJson = await recordRes.json();
+    addLog('RESPONSE', '通话录音查询响应', recordJson);
+    
+    if (recordJson.status !== 0 || !recordJson.data || recordJson.data.length === 0) {
+      addLog('ERROR', '无通话记录', { response: recordJson });
+      return { workId, need_human_review: true };
+    }
+
+    // 筛选工程师与用户的通话记录
+    const validRecords = recordJson.data.filter(r => 
+      (r.callTypeName === '工程师' && r.peerTypeName === '用户') ||
+      (r.callTypeName === '用户' && r.peerTypeName === '工程师')
+    );
+
+    if (validRecords.length === 0) {
+      addLog('ERROR', '无工程师与用户的通话记录', { response: recordJson });
+      return { workId, need_human_review: true };
+    }
+
+    // 取最新一条
+    validRecords.sort((a, b) => b.startTime - a.startTime);
+    const latestRecord = validRecords[0];
+
+    addLog('SUCCESS', `Skill1 完成: tapeUrl=${latestRecord.tapeUrl ? '有' : '无'}`, { 
+      workId,
+      hasAudio: !!latestRecord.tapeUrl 
+    });
+    
+    return {
+      workId,
+      audio_url: latestRecord.tapeUrl || '',
+      audio_text: latestRecord.remark || '',
+      need_human_review: false
+    };
+  } catch (e) {
+    addLog('ERROR', `Skill1 执行异常: ${e.message}`);
+    throw e;
   }
-
-  // 筛选工程师与用户的通话记录
-  const validRecords = recordJson.data.filter(r => 
-    (r.callTypeName === '工程师' && r.peerTypeName === '用户') ||
-    (r.callTypeName === '用户' && r.peerTypeName === '工程师')
-  );
-
-  if (validRecords.length === 0) {
-    addLog('ERROR', '无工程师与用户的通话记录');
-    return { workId, need_human_review: true };
-  }
-
-  // 取最新一条
-  validRecords.sort((a, b) => b.startTime - a.startTime);
-  const latestRecord = validRecords[0];
-
-  addLog('SUCCESS', `Skill1 完成: tapeUrl=${latestRecord.tapeUrl ? '有' : '无'}`, { 
-    workId,
-    hasAudio: !!latestRecord.tapeUrl 
-  });
-  
-  return {
-    workId,
-    audio_url: latestRecord.tapeUrl || '',
-    audio_text: latestRecord.remark || '',
-    need_human_review: false
-  };
 }
 
 // Skill 2: 意图识别 (真实 API)
@@ -271,7 +281,7 @@ async function skill2_recognizeIntent(audioText, audioUrl) {
     
     // 映射到三种意图
     let intentName = 'other';
-    if (category.includes('确认上门') || category.includes('确认')) {
+    if (category.includes('确认上门') || category.includes('确定上门') || category.includes('上门时间')) {
       intentName = 'confirm_visit';
     } else if (category.includes('不需要') || category.includes('取消') || category.includes('询价')) {
       intentName = 'price_or_cancel';
@@ -285,8 +295,8 @@ async function skill2_recognizeIntent(audioText, audioUrl) {
     };
     
   } catch (e) {
-    addLog('ERROR', `意图识别异常: ${e.message}`);
-    return { intent_name: 'other', confidence: 0, need_human_review: true };
+    addLog('ERROR', `Skill2 执行异常: ${e.message}`);
+    throw e;
   }
 }
 
@@ -324,8 +334,13 @@ async function skill0_checkTrackStatus(trackWorkId) {
   const workIdMatch = xmlText.match(/<workId>(\d+)<\/workId>/);
   
   if (!statusMatch || statusMatch[1] !== '0') {
-    addLog('ERROR', '查询跟单状态失败', { status: statusMatch?.[1] });
-    throw new Error('查询跟单状态失败');
+    addLog('WARNING', '查询跟单状态失败，使用默认值继续', { status: statusMatch?.[1], xml: xmlText.substring(0, 300) });
+    return {
+      status: '未知',
+      statusName: '未知',
+      workId: null,
+      isCompleted: false
+    };
   }
   
   const status = statusNameMatch ? statusNameMatch[1] : '未知';
@@ -393,7 +408,7 @@ async function skill3_handleTrack(workId, trackWorkId, intentName) {
   const msg = msgMatch ? msgMatch[1] : '未知错误';
   
   if (status !== '0') {
-    addLog('ERROR', `跟单处理失败: ${msg}`, { status });
+    addLog('ERROR', `跟单处理失败: ${msg}`, { status, xml: xmlText });
     throw new Error(`跟单处理失败: ${msg}`);
   }
   
@@ -401,70 +416,19 @@ async function skill3_handleTrack(workId, trackWorkId, intentName) {
   return { success: true, msg };
 }
 
-// Skill 4: 改约
+// Skill 4: 改约（未实现）
 async function skill4_modifyDutyTime(workId) {
-  log('Skill4: 改约', 'step');
-  
-  // TODO: 调用实际的 modify-duty-time Skill
-  const result = await invokeTool('llm-task', 'json', {
-    prompt: '执行工单改约，新预约时间=当前日期+2天 09:00',
-    input: { workId },
-    schema: {
-      type: 'object',
-      properties: {
-        dutyTime: { type: 'string' },
-        operator: { type: 'string' }
-      }
-    }
-  });
-  
-  const data = result.result?.details?.json || {};
-  log(`Skill4 完成: dutyTime=${data.dutyTime || 'N/A'}`, 'success');
-  return data;
+  throw new Error('Skill4 改约功能未实现，请先实现实际API调用');
 }
 
-// Skill 5: 取消
+// Skill 5: 取消（未实现）
 async function skill5_cancelWork(workId) {
-  log('Skill5: 取消工单', 'step');
-  
-  // TODO: 调用实际的 cancel-work Skill
-  const result = await invokeTool('llm-task', 'json', {
-    prompt: '执行工单取消，取消原因=用户不需要了',
-    input: { workId },
-    schema: {
-      type: 'object',
-      properties: {
-        success: { type: 'boolean' },
-        cancelId: { type: 'string' }
-      }
-    }
-  });
-  
-  const data = result.result?.details?.json || {};
-  log('Skill5 完成', 'success');
-  return data;
+  throw new Error('Skill5 取消工单功能未实现，请先实现实际API调用');
 }
 
-// Skill 6: 创建跟单任务
+// Skill 6: 创建跟单任务（未实现）
 async function skill6_createTrackTask(workId, intentName) {
-  log('Skill6: 创建跟单任务', 'step');
-  
-  // TODO: 调用实际的 create-track-task Skill
-  const result = await invokeTool('llm-task', 'json', {
-    prompt: '创建挂起跟单任务',
-    input: { workId, intentName },
-    schema: {
-      type: 'object',
-      properties: {
-        taskId: { type: 'string' },
-        success: { type: 'boolean' }
-      }
-    }
-  });
-  
-  const data = result.result?.details?.json || {};
-  log(`Skill6 完成: taskId=${data.taskId || 'N/A'}`, 'success');
-  return data;
+  throw new Error('Skill6 创建跟单任务功能未实现，请先实现实际API调用');
 }
 
 // ==================== 主工作流 ====================
@@ -476,22 +440,17 @@ async function runWorkflow(trackWorkId) {
   let currentStep = 0;
   
   try {
-    // Step 0: 检查跟单状态
+    // Step 0: 检查跟单状态（已跳过判断，无论状态都继续执行）
     currentStep++;
     steps.push({ step: currentStep, name: 'Skill0: 检查跟单状态', status: 'running' });
-    const skill0Result = await skill0_checkTrackStatus(trackWorkId);
-    steps[steps.length - 1] = { ...steps[steps.length - 1], status: 'completed', result: skill0Result };
-    
-    // 如果跟单已完结，返回失败
-    if (skill0Result.isCompleted) {
-      addLog('ERROR', '跟单已完结，无法处理');
-      printSummary(false, 'Skill0', '跟单已完结', steps);
-      return {
-        success: false,
-        fail_at: 'Skill0',
-        fail_reason: '跟单已完结',
-        steps
-      };
+    let skill0Result = { workId: null, isCompleted: false };
+    try {
+      skill0Result = await skill0_checkTrackStatus(trackWorkId);
+      steps[steps.length - 1] = { ...steps[steps.length - 1], status: 'completed', result: skill0Result };
+      addLog('INFO', `跟单状态: ${skill0Result.status}`, { workId: skill0Result.workId });
+    } catch (e) {
+      steps[steps.length - 1] = { ...steps[steps.length - 1], status: 'failed', error: e.message };
+      addLog('WARNING', '查询跟单状态失败，继续执行后续步骤', { error: e.message });
     }
     
     // Step 1: Skill1 - 获取录音

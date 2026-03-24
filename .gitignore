@@ -1,0 +1,18 @@
+# Auth files (secrets)
+.auth
+**/.auth
+
+# Archives
+workflows/archives/
+
+# Temp files
+temp_*.js
+*.log
+*.tmp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Node
+node_modules/

@@ -1,0 +1,10 @@
+{
+  "name": "intention-post-processing",
+  "version": "1.0.0",
+  "description": "意图后处理工作流 (MVP) - 挂起跟单自动化处理",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "test": "node test.js"
+  }
+}

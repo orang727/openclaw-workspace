@@ -14,6 +14,172 @@ const https = require('https');
 const url = require('url');
 const fs = require('fs');
 const path = require('path');
+const { execSync } = require('child_process');
+
+// ==================== 沙箱 Session 管理 ====================
+const SANDBOX = {
+    sessions: new Map(),  // sessionId -> sessionInfo
+    archiveDir: require('os').homedir() + '/.openclaw/workspace/workflows/archives',
+
+    // 生成唯一沙箱 ID
+    generateId() {
+        return `sandbox-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    },
+
+    // 创建新沙箱 Session
+    async create(trackWorkId) {
+        const sandboxId = this.generateId();
+        const sessionFile = require('os').homedir() + `/.openclaw/agents/main/sessions/${sandboxId}.jsonl`;
+
+        const sessionInfo = {
+            sandboxId,
+            trackWorkId,
+            createdAt: new Date().toISOString(),
+            status: 'created',
+            sessionFile,
+            history: []
+        };
+
+        // 创建 session 文件
+        fs.writeFileSync(sessionFile, '', 'utf8');
+
+        // 注册到 sessions.json
+        await this.registerSession(sandboxId, sessionFile);
+
+        this.sessions.set(sandboxId, sessionInfo);
+        console.log(`[Sandbox] 创建新沙箱: ${sandboxId} (trackWorkId=${trackWorkId})`);
+        return sandboxId;
+    },
+
+    // 注册 Session 到 sessions.json
+    async registerSession(sandboxId, sessionFile) {
+        const sessionsFile = require('os').homedir() + '/.openclaw/agents/main/sessions/sessions.json';
+        try {
+            const data = JSON.parse(fs.readFileSync(sessionsFile, 'utf8'));
+            const key = `agent:main:${sandboxId}`;
+            data[key] = {
+                sessionId: sandboxId,
+                updatedAt: Date.now(),
+                systemSent: true,
+                abortedLastRun: false,
+                chatType: 'direct',
+                deliveryContext: { channel: 'workflow-sandbox' },
+                lastChannel: 'workflow-sandbox',
+                origin: {
+                    provider: 'workflow-sandbox',
+                    surface: 'sandbox',
+                    chatType: 'direct'
+                },
+                sessionFile: sessionFile,
+                compactionCount: 0
+            };
+            fs.writeFileSync(sessionsFile, JSON.stringify(data, null, 2), 'utf8');
+        } catch (e) {
+            console.error(`[Sandbox] 注册 Session 失败: ${e.message}`);
+        }
+    },
+
+    // 更新沙箱状态
+    async update(sandboxId, updates) {
+        const session = this.sessions.get(sandboxId);
+        if (session) {
+            Object.assign(session, updates);
+        }
+    },
+
+    // 添加执行记录
+    async addHistory(sandboxId, record) {
+        const session = this.sessions.get(sandboxId);
+        if (session) {
+            session.history.push({
+                ...record,
+                timestamp: new Date().toISOString()
+            });
+
+            // 写入历史文件
+            fs.appendFileSync(session.sessionFile, JSON.stringify(record) + '\n', 'utf8');
+        }
+    },
+
+    // 存档执行结果
+    async archive(sandboxId, result) {
+        const session = this.sessions.get(sandboxId);
+        if (!session) {
+            console.log(`[Sandbox] 沙箱 ${sandboxId} 不存在，跳过存档`);
+            return null;
+        }
+
+        // 确保存档目录存在
+        const today = new Date().toISOString().split('T')[0];
+        const archivePath = `${this.archiveDir}/${today}`;
+        if (!fs.existsSync(archivePath)) {
+            fs.mkdirSync(archivePath, { recursive: true });
+        }
+
+        const archiveFile = `${archivePath}/${sandboxId}.json`;
+        const archiveData = {
+            sandboxId,
+            trackWorkId: session.trackWorkId,
+            executedAt: session.createdAt,
+            completedAt: new Date().toISOString(),
+            duration: Date.now() - new Date(session.createdAt).getTime(),
+            result,
+            history: session.history,
+            metadata: {
+                version: '1.0.0',
+                server: 'workflow-server'
+            }
+        };
+
+        fs.writeFileSync(archiveFile, JSON.stringify(archiveData, null, 2), 'utf8');
+        console.log(`[Sandbox] 存档完成: ${archiveFile}`);
+        return archiveFile;
+    },
+
+    // 销毁沙箱 Session
+    async destroy(sandboxId) {
+        const session = this.sessions.get(sandboxId);
+        if (!session) {
+            console.log(`[Sandbox] 沙箱 ${sandboxId} 不存在`);
+            return;
+        }
+
+        // 从 sessions.json 移除
+        await this.unregisterSession(sandboxId);
+
+        // 删除历史文件
+        try {
+            if (fs.existsSync(session.sessionFile)) {
+                fs.unlinkSync(session.sessionFile);
+            }
+        } catch (e) {
+            console.error(`[Sandbox] 删除 session 文件失败: ${e.message}`);
+        }
+
+        this.sessions.delete(sandboxId);
+        console.log(`[Sandbox] 销毁沙箱: ${sandboxId}`);
+    },
+
+    // 从 sessions.json 移除
+    async unregisterSession(sandboxId) {
+        const sessionsFile = require('os').homedir() + '/.openclaw/agents/main/sessions/sessions.json';
+        try {
+            const data = JSON.parse(fs.readFileSync(sessionsFile, 'utf8'));
+            const key = `agent:main:${sandboxId}`;
+            if (data[key]) {
+                delete data[key];
+                fs.writeFileSync(sessionsFile, JSON.stringify(data, null, 2), 'utf8');
+            }
+        } catch (e) {
+            console.error(`[Sandbox] 注销 Session 失败: ${e.message}`);
+        }
+    },
+
+    // 获取沙箱列表
+    list() {
+        return Array.from(this.sessions.values());
+    }
+};
 
 // ==================== 读取 AK Token ====================
 function loadAuth() {
@@ -46,9 +212,9 @@ const CONFIG = {
         trackList: 'https://test3-track.xiujiadian.com/amis/track/list',
         callRecord: 'https://test3-admin.xiujiadian.com/bfm-serv-work/serv/work/listCallRecord',
         intentAnalyze: 'https://test-ai.xiujiadian.com/zmn-ai-workflow/v1/ad8e7c2049b047ceaeed832dfbd73def/execute_flow',
-        handleTrack: 'https://test3-track.xiujiadian.com/amis/track/handle',
+        handleTrack: 'https://test3-track.xiujiadian.com/amis/track/save/newHandle',
         modifyTime: 'https://test3-admin.xiujiadian.com/bfm-serv-work/serv/work/modifyAppointmentTime',
-        cancelWork: 'https://test3-admin.xiujiadian.com/bfm-serv-work/serv/work/cancel',
+        cancelWork: 'https://test3-admin.xiujiadian.com/bfm-serv-work/cancel/submitCancelApply',
         createFollowup: 'https://test3-track.xiujiadian.com/amis/track/create'
     },
     
@@ -416,15 +582,15 @@ async function skill3_handleTrack(trackWorkId, servWorkId, intentName, intentRes
         const handleStatus = handleResult.data?.AMISResponseDTO?.status || handleResult.data?.status;
         const handleMsg = handleResult.data?.AMISResponseDTO?.msg || handleResult.data?.msg;
 
-        // 检查是否是"接口不存在"错误
+        // 检查是否是"接口不存在"错误 - 阻断执行
         if (handleMsg?.includes('No endpoint') || handleMsg?.includes('不存在')) {
-            log(`Skill3: ⚠️ 跟单处理接口不存在，跳过此步骤`, 'warning');
+            log(`Skill3: ❌ 跟单处理接口不存在，阻断执行`, 'error');
             return {
-                success: true,
+                success: false,
                 servWorkId: servWorkId,
                 handle_remark: `${intentName}\n${intentResult}`,
-                result: 'skipped',
-                reason: 'API endpoint not available'
+                result: 'api_not_available',
+                fail_reason: `接口不存在：${handleMsg}`
             };
         }
 
@@ -525,23 +691,34 @@ async function skill5_cancelWork(trackWorkId, servWorkId, cancelReason) {
         const cancelStatus = cancelResult.data?.AMISResponseDTO?.status || cancelResult.data?.status;
         const cancelMsg = cancelResult.data?.AMISResponseDTO?.msg || cancelResult.data?.msg || cancelResult.data?.message;
 
-        // 检查是否是"接口不存在"错误
+        // 检查是否是"接口不存在"错误 - 阻断执行
         if (cancelMsg?.includes('No endpoint') || cancelMsg?.includes('不存在')) {
             log(`Skill5: ❌ 取消工单接口不存在，阻断执行`, 'error');
             return {
                 success: false,
                 cancel_reason: cancelReason,
                 result: 'api_not_available',
-                reason: `接口不存在：${cancelMsg}`
+                fail_reason: `接口不存在：${cancelMsg}`
+            };
+        }
+
+        // 检查是否是业务限制（如"请先联系工程师"）- 阻断执行
+        if (cancelMsg?.includes('请先联系') || cancelMsg?.includes('联系工程师') || cancelMsg?.includes('联系用户')) {
+            log(`Skill5: ❌ 业务限制：${cancelMsg}，阻断执行`, 'error');
+            return {
+                success: false,
+                cancel_reason: cancelReason,
+                result: 'blocked',
+                fail_reason: cancelMsg
             };
         }
 
         if (cancelResult.status !== 200 || cancelStatus != 0) {
-            log(`Skill5: ❌ 取消工单失败: status=${cancelStatus}, msg=${cancelMsg}`, 'error');
+            log(`Skill5: ⚠️ 取消工单失败但继续: status=${cancelStatus}, msg=${cancelMsg}`, 'warning');
             return {
-                success: false,
+                success: true,
                 cancel_reason: cancelReason,
-                result: 'failed',
+                result: 'failed_but_continue',
                 fail_reason: `${cancelMsg || 'HTTP ' + cancelResult.status}`
             };
         }
@@ -826,22 +1003,75 @@ const server = http.createServer(async (req, res) => {
         req.on('data', chunk => body += chunk);
         req.on('end', async () => {
             try {
-                const { trackWorkId } = JSON.parse(body);
-                
+                const { trackWorkId, useSandbox = true } = JSON.parse(body);
+
                 if (!trackWorkId) {
                     res.writeHead(400, { 'Content-Type': 'application/json' });
                     res.end(JSON.stringify({ error: '缺少 trackWorkId 参数' }));
                     return;
                 }
-                
-                log(`📥 收到执行请求：trackWorkId=${trackWorkId}`, 'info');
-                
-                const result = await runWorkflow(trackWorkId);
-                
+
+                log(`📥 收到执行请求：trackWorkId=${trackWorkId}, useSandbox=${useSandbox}`, 'info');
+
+                let sandboxId = null;
+                let result;
+
+                if (useSandbox) {
+                    // ==================== 沙箱模式 ====================
+                    // 1. 创建新沙箱
+                    sandboxId = await SANDBOX.create(trackWorkId);
+                    await SANDBOX.update(sandboxId, { status: 'executing' });
+
+                    // 2. 添加启动记录
+                    await SANDBOX.addHistory(sandboxId, {
+                        type: 'workflow_start',
+                        trackWorkId,
+                        message: `开始执行工作流 ${sandboxId}`
+                    });
+
+                    try {
+                        // 3. 执行工作流
+                        result = await runWorkflow(trackWorkId);
+
+                        // 4. 添加完成记录
+                        await SANDBOX.addHistory(sandboxId, {
+                            type: 'workflow_complete',
+                            trackWorkId,
+                            success: result.success,
+                            result: result
+                        });
+
+                        // 5. 存档
+                        const archivePath = await SANDBOX.archive(sandboxId, result);
+                        result.archivePath = archivePath;
+                        result.sandboxId = sandboxId;
+
+                        // 6. 更新状态并销毁沙箱
+                        await SANDBOX.update(sandboxId, { status: 'completed' });
+
+                    } catch (execError) {
+                        // 执行异常处理
+                        await SANDBOX.addHistory(sandboxId, {
+                            type: 'workflow_error',
+                            trackWorkId,
+                            error: execError.message
+                        });
+                        await SANDBOX.archive(sandboxId, { error: execError.message });
+                        throw execError;
+                    } finally {
+                        // 始终销毁沙箱
+                        await SANDBOX.destroy(sandboxId);
+                    }
+
+                } else {
+                    // ==================== 普通模式（无沙箱） ====================
+                    result = await runWorkflow(trackWorkId);
+                }
+
                 res.writeHead(200, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify(result));
-                
-                log(`📤 执行完成：success=${result.success}`, 'info');
+
+                log(`📤 执行完成：success=${result.success}${sandboxId ? `, sandboxId=${sandboxId}` : ''}`, 'info');
                 
             } catch (error) {
                 console.error('❌ 执行异常:', error);
@@ -851,7 +1081,73 @@ const server = http.createServer(async (req, res) => {
         });
         return;
     }
-    
+
+    // ==================== 沙箱管理接口 ====================
+
+    // 沙箱列表
+    if (pathname === '/sandbox/list' && req.method === 'GET') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+            active: SANDBOX.list(),
+            archiveDir: SANDBOX.archiveDir
+        }));
+        return;
+    }
+
+    // 查看存档
+    if (pathname.startsWith('/archive/') && req.method === 'GET') {
+        const archivePath = decodeURIComponent(pathname.split('/archive/')[1]);
+        const fullPath = SANDBOX.archiveDir + '/' + archivePath;
+
+        if (fs.existsSync(fullPath)) {
+            const data = fs.readFileSync(fullPath, 'utf8');
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(data);
+        } else {
+            res.writeHead(404, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Archive not found' }));
+        }
+        return;
+    }
+
+    // 存档列表
+    if (pathname === '/archive/list' && req.method === 'GET') {
+        const archives = [];
+        if (fs.existsSync(SANDBOX.archiveDir)) {
+            const dirs = fs.readdirSync(SANDBOX.archiveDir);
+            for (const dir of dirs) {
+                const dirPath = `${SANDBOX.archiveDir}/${dir}`;
+                if (fs.statSync(dirPath).isDirectory()) {
+                    const files = fs.readdirSync(dirPath);
+                    for (const file of files) {
+                        if (file.endsWith('.json')) {
+                            const stats = fs.statSync(`${dirPath}/${file}`);
+                            archives.push({
+                                date: dir,
+                                file,
+                                path: `${dir}/${file}`,
+                                size: stats.size,
+                                modified: stats.mtime.toISOString()
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(archives.sort((a, b) => b.modified - a.modified)));
+        return;
+    }
+
+    // 手动销毁沙箱
+    if (pathname.startsWith('/sandbox/destroy/') && req.method === 'POST') {
+        const sandboxId = pathname.split('/sandbox/destroy/')[1];
+        await SANDBOX.destroy(sandboxId);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, sandboxId }));
+        return;
+    }
+
     // 404
     res.writeHead(404, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: 'Not Found' }));
@@ -860,14 +1156,25 @@ const server = http.createServer(async (req, res) => {
 // ==================== 启动服务器 ====================
 server.listen(CONFIG.port, () => {
     log('═══════════════════════════════════════════════════════════', 'system');
-    log('🚀 挂起工作流 HTTP 服务已启动', 'system');
+    log('🚀 挂起工作流 HTTP 服务已启动（沙箱模式）', 'system');
     log(`📍 监听端口：${CONFIG.port}`, 'info');
     log('📡 接口地址:', 'info');
     log(`   GET  /health - 健康检查`, 'info');
-    log(`   POST /execute - 执行工作流`, 'info');
-    log('📝 使用示例:', 'info');
+    log(`   POST /execute - 执行工作流（自动沙箱）`, 'info');
+    log(`   GET  /sandbox/list - 查看活跃沙箱`, 'info');
+    log(`   GET  /archive/list - 查看存档列表`, 'info');
+    log(`   GET  /archive/{date}/{file} - 查看存档详情`, 'info');
+    log(`   POST /sandbox/destroy/{id} - 手动销毁沙箱`, 'info');
+    log('📝 执行示例:', 'info');
+    log(`   # 沙箱模式（默认）`, 'info');
     log(`   curl -X POST http://localhost:${CONFIG.port}/execute \\`, 'info');
     log(`     -H "Content-Type: application/json" \\`, 'info');
     log(`     -d '{"trackWorkId": "1234567890"}'`, 'info');
+    log(`   # 普通模式（无沙箱）`, 'info');
+    log(`   curl -X POST http://localhost:${CONFIG.port}/execute \\`, 'info');
+    log(`     -H "Content-Type: application/json" \\`, 'info');
+    log(`     -d '{"trackWorkId": "1234567890", "useSandbox": false}'`, 'info');
+    log('📦 存档目录:', 'info');
+    log(`   ${SANDBOX.archiveDir}`, 'info');
     log('═══════════════════════════════════════════════════════════', 'system');
 });

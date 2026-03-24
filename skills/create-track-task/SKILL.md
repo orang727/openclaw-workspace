@@ -1,117 +1,367 @@
 ---
-name: create-track-task
-description: 调用跟单任务创建接口，通过 HTTP POST 请求在测试环境创建新的跟单任务。支持自动登录获取 Session 和 Ratel 网关签名。
-trigger_words: ["创建跟单任务", "跟单", "track task", "添加跟单"]
+name: create-track-task 
+description: 根据跟单ID和工单ID创建跟单任务。通过 AK Bearer Token 认证，调用跟单系统 API 获取跟单数据。
 ---
 
 # 创建跟单任务
 
-## 接口信息
+根据跟单ID和工单ID创建跟单任务。流程：获取权限 → 查询跟单详情 → 转换入参并创建任务 → 返回任务ID。
 
-- **接口地址**: `https://test3-admin.xiujiadian.com/ratel/biz-twd/trackTaskModifyRemoteService/addTrackTask`
-- **请求方法**: POST
-- **Content-Type**: application/json
-- **环境**: 测试环境 (test3)
+## 入参说明
 
-## 认证信息
+| 参数名         | 类型      | 必填  | 说明    |
+| ----------- | ------- | --- | ----- |
+| trackWorkId | Long    | 是   | 跟单ID  |
+| workId      | Long    | 是   | 工单ID  |
+| taskItemId  | Integer | 是   | 任务项ID |
 
-- **app-key**: `254B4EF88B5303E`
-- **secret_key**: `2c0c38615fa4465ea76a800e2cba26e4`
-- **登录接口**: `https://test3-mcc.xiujiadian.com/cas/login.action`
+---
 
-## 签名算法
+## Step 1: 权限获取
 
-参考 `ratel_sign.py`：
+### .auth 文件配置
 
-```python
-# 签名格式: METHOD&SECRET_KEY&/&TIMESTAMP&URL_ENCODE(SORTED_QUERY_PARAMS&BODY)
-string_to_sign = "&".join([
-    method.upper(),           # POST
-    secret_key,               # 2c0c38615fa4465ea76a800e2cba26e4
-    special_url_encode("/"),  # %2F
-    str(timestamp),           # 毫秒时间戳
-    special_url_encode(sorted_query_string),  # URL编码后的参数
-])
-signature = md5(string_to_sign.encode("utf-8")).hexdigest()
-```
-
-## 调用示例
-
-```python
-from api_client import create_track_task_with_auth
-
-# 创建跟单任务
-result = create_track_task_with_auth(
-    task_data={
-        "bizOrderId": "123420282989890689",  # 工单ID
-        "bizId": "123420282989890689",       # 跟单ID
-        "taskItemId": 2003,                   # 跟单任务code
-        "operatorRemark": "创建跟单任务"
-    },
-    username="zmn001879",
-    password="8888888"
-)
-
-print(result)
-# 输出: {"success": true, "status": 200, "data": 127212674567489409}
-```
-
-## 核心参数
-
-| 字段名 | 类型 | 必填 | 说明 |
-|--------|------|------|------|
-| bizOrderId | string | 是 | 工单ID |
-| bizId | string | 是 | 跟单ID |
-| taskItemId | number | 是 | 跟单任务code |
-| operatorRemark | string | 否 | 操作备注 |
-| operateTime | string | 是 | 操作时间（自动填充） |
-
-## 文件结构
+路径：`{skillDir}/.auth`，格式如下：
 
 ```
-create-track-task/
-├── SKILL.md          # 本说明文档
-├── api_client.py     # API 客户端（登录、签名、接口调用）
-├── config.py         # 环境配置（密钥、URL）
-└── ratel_sign.py     # Ratel 签名算法参考
+AK=<your_ak_token>
 ```
 
-## 使用方式
+### 认证方式
 
-**方式 1：交互式输入（推荐，密码不保存）**
-```python
-from api_client import prompt_and_login, create_track_task
+所有接口使用 AK Bearer Token 认证，请求头：`Authorization: Bearer <AK>`
 
-# 1. 交互式登录（提示输入用户名密码）
-session = prompt_and_login()
+### .auth 文件解析
 
-# 2. 创建跟单任务
-result = create_track_task(
-    task_data={"bizOrderId": "xxx", "bizId": "xxx", "taskItemId": 2003},
-    session=session
-)
+```javascript
+const fs = require('fs');
+const authContent = fs.readFileSync('{skillDir}/.auth', 'utf8');
+const authConfig = {};
+authContent.split('\n').forEach(line => {
+  const idx = line.indexOf('=');
+  if (idx > 0) authConfig[line.substring(0, idx).trim()] = line.substring(idx + 1).trim();
+});
+// authConfig.AK 即为 Token
 ```
 
-**方式 2：代码中传入凭据（密码不会保存到文件）**
-```python
-from api_client import login, create_track_task
+---
 
-# 1. 登录（只保存 session cookies，不保存密码）
-session = login("zmn001879", "8888888")
+## Step 2: 查询跟单详情
 
-# 2. 创建跟单任务
-result = create_track_task(
-    task_data={"bizOrderId": "xxx", "bizId": "xxx", "taskItemId": 2003},
-    session=session
-)
+### API 端点
+
+```
+GET https://test3-track.xiujiadian.com/amis/track/detail?trackWorkId={trackWorkId}&workId={workId}
 ```
 
-**方式 3：使用已缓存的 Session（无需重复登录）**
-```python
-from api_client import create_track_task_with_auth
+### 响应格式（XML）
 
-# 如果本地有有效的 Session，直接使用；否则抛出异常提示登录
-result = create_track_task_with_auth(
-    task_data={"bizOrderId": "xxx", "bizId": "xxx", "taskItemId": 2003}
-)
+```xml
+<AMISResponseDTO>
+  <status>0</status>
+  <msg>操作成功</msg>
+  <data>
+    <trackWorkId>127325906441705088</trackWorkId>
+    <workId>6127325899314773120</workId>
+    <statusName>待处理</statusName>
+    <trackContent>挂起申请</trackContent>
+    <cityId>500100</cityId>
+    <cityName>重庆市</cityName>
+    <companyId>10041</companyId>
+    <companyName>重庆公司</companyName>
+    <engineerId>45429907</engineerId>
+    <engineerName>陈志强</engineerName>
+    <engineerPhone>19400001027</engineerPhone>
+    <!-- 其他字段省略 -->
+  </data>
+</AMISResponseDTO>
+```
+
+### 响应关键字段
+
+| XML 字段 | 说明 |
+|----------|------|
+| trackWorkId | 跟单ID |
+| workId | 服务工单ID |
+| statusName | 跟单状态名称 |
+| trackContent | 跟单内容 |
+| cityId | 城市ID |
+| cityName | 城市名称 |
+| companyId | 子公司ID |
+| companyName | 子公司名称 |
+| engineerId | 工程师ID |
+| engineerName | 工程师名称 |
+| engineerPhone | 工程师手机号 |
+
+---
+
+## Step 3: 转换入参 & 创建跟单任务
+
+### 字段映射规则
+
+| 创建任务入参 (TrackTaskCreateDIO) | 来源 | 说明 |
+|----------------------------------|------|------|
+| **taskItemId** | 用户指定 | 任务项ID（必填） |
+| **bizId** | trackWorkId | 跟单ID作为业务ID |
+| **bizSource** | 固定值: 40 | 业务来源=跟单 |
+| **bizOrderType** | 固定值: 2 | 业务单据类型=服务工单 |
+| **bizOrderId** | workId | 工单ID |
+| **cityId** | cityId | 城市ID（必填） |
+| **cityName** | cityName | 城市名称 |
+| **subCompanyId** | companyId | 子公司ID |
+| **subCompanyName** | companyName | 子公司名称 |
+| **engineerId** | engineerId | 工程师ID |
+| **engineerName** | engineerName | 工程师名称 |
+| **userTelephone** | engineerPhone | 手机号（必填） |
+| **plat** | 固定值: 10 | 平台（必填） |
+
+### 创建任务 API 端点
+
+```
+POST https://test-ais.xiujiadian.com/ratel-api/biz-twd/trackTaskModifyRemoteService/addTrackTask
+```
+
+### 请求体示例
+
+```json
+{
+  "taskItemId": 1202,
+  "bizId": 127325906441705088,
+  "bizSource": 40,
+  "bizOrderType": 2,
+  "bizOrderId": 6127325899314773120,
+  "cityId": 500100,
+  "cityName": "重庆市",
+  "subCompanyId": 10041,
+  "subCompanyName": "重庆公司",
+  "engineerId": 45429907,
+  "engineerName": "陈志强",
+  "userTelephone": "19400001027",
+  "plat": 10
+}
+```
+
+### 响应格式
+
+```json
+{
+  "success": true,
+  "data": 12345678,
+  "msg": "操作成功"
+}
+```
+
+`data` 字段即为创建的跟单任务ID (trackTaskId)。
+
+---
+
+## 完整执行脚本
+
+```javascript
+// /tmp/create_track_task_from_detail.js
+const fs = require('fs');
+
+// ========== 配置参数 ==========
+const skillDir = '{skillDir}';
+const trackWorkId = '{trackWorkId}';
+const workId = '{workId}';
+const taskItemId = {taskItemId};
+
+// ========== Step 1: 权限获取 ==========
+const authContent = fs.readFileSync(skillDir + '/.auth', 'utf8');
+const authConfig = {};
+authContent.split('\n').forEach(line => {
+  const idx = line.indexOf('=');
+  if (idx > 0) authConfig[line.substring(0, idx).trim()] = line.substring(idx + 1).trim();
+});
+
+if (!authConfig.AK) {
+  console.log('ERROR: .auth 文件中未配置 AK');
+  process.exit(1);
+}
+console.log('Step 1: 权限获取成功');
+
+// XML 解析辅助函数
+const getXmlValue = (xml, tag) => {
+  const match = xml.match(new RegExp(`<${tag}>([^<]*)</${tag}`));
+  return match ? match[1] : '';
+};
+
+(async () => {
+  try {
+    // ========== Step 2: 查询跟单详情 ==========
+    const detailUrl = `https://test3-track.xiujiadian.com/amis/track/detail?trackWorkId=${trackWorkId}&workId=${workId}`;
+    const detailRes = await fetch(detailUrl, {
+      method: 'GET',
+      headers: { 'Authorization': 'Bearer ' + authConfig.AK }
+    });
+    const detailText = await detailRes.text();
+    
+    const status = getXmlValue(detailText, 'status');
+    if (status !== '0') {
+      console.log('ERROR: 查询跟单详情失败 - ' + getXmlValue(detailText, 'msg'));
+      return;
+    }
+    
+    const track = {
+      trackWorkId: getXmlValue(detailText, 'trackWorkId'),
+      workId: getXmlValue(detailText, 'workId'),
+      trackContent: getXmlValue(detailText, 'trackContent'),
+      statusName: getXmlValue(detailText, 'statusName'),
+      cityId: getXmlValue(detailText, 'cityId'),
+      cityName: getXmlValue(detailText, 'cityName'),
+      companyId: getXmlValue(detailText, 'companyId'),
+      companyName: getXmlValue(detailText, 'companyName'),
+      engineerId: getXmlValue(detailText, 'engineerId'),
+      engineerName: getXmlValue(detailText, 'engineerName'),
+      engineerPhone: getXmlValue(detailText, 'engineerPhone')
+    };
+    
+    console.log('Step 2: 查询跟单详情成功');
+    console.log('  - 跟单ID: ' + track.trackWorkId);
+    console.log('  - 工单ID: ' + track.workId);
+    console.log('  - 跟单内容: ' + track.trackContent);
+    console.log('  - 跟单状态: ' + track.statusName);
+    
+    // ========== Step 3: 转换入参 & 创建跟单任务 ==========
+    const createBody = {
+      taskItemId: taskItemId,
+      bizId: parseInt(track.trackWorkId),
+      bizSource: 40,
+      bizOrderType: 2,
+      bizOrderId: parseInt(track.workId),
+      cityId: parseInt(track.cityId),
+      cityName: track.cityName,
+      subCompanyId: parseInt(track.companyId),
+      subCompanyName: track.companyName,
+      engineerId: parseInt(track.engineerId),
+      engineerName: track.engineerName,
+      userTelephone: track.engineerPhone,
+      plat: 10
+    };
+    
+    console.log('\nStep 3: 转换入参');
+    console.log(JSON.stringify(createBody, null, 2));
+    
+    // 调用创建接口
+    const createUrl = 'https://test-ais.xiujiadian.com/ratel-api/biz-twd/trackTaskModifyRemoteService/addTrackTask';
+    const createRes = await fetch(createUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + authConfig.AK
+      },
+      body: JSON.stringify(createBody)
+    });
+    
+    const createText = await createRes.text();
+    try {
+      const result = JSON.parse(createText);
+      if (result.success === true && result.data) {
+        console.log('\n========== 创建成功 ==========');
+        console.log('跟单任务ID: ' + result.data);
+        console.log('SUCCESS: trackTaskId=' + result.data);
+      } else {
+        console.log('\nERROR: 创建失败 - ' + (result.msg || result.message || JSON.stringify(result)));
+      }
+    } catch(e) {
+      console.log('\nERROR: 响应解析失败 - ' + createText.substring(0, 500));
+    }
+  } catch (e) {
+    console.log('ERROR: ' + e.message);
+  }
+})();
+```
+
+```bash
+node /tmp/create_track_task_from_detail.js
+```
+
+---
+
+## 占位符说明
+
+| 占位符 | 替换为 | 说明 |
+|--------|--------|------|
+| `{skillDir}` | SKILL.md 所在目录绝对路径 | 用于定位 .auth 文件 |
+| `{trackWorkId}` | 用户提供的跟单ID | 查询参数 |
+| `{workId}` | 用户提供的工单ID | 查询参数 |
+| `{taskItemId}` | 用户指定的任务项ID | 创建参数（必填，Integer） |
+
+---
+
+## 枚举值参考
+
+### bizOrderType（业务单据类型）- 固定为 2
+
+| 值 | 说明 |
+|----|------|
+| 1 | 服务订单 |
+| 2 | **服务工单** |
+
+### bizSource（业务来源）- 固定为 40
+
+| 值 | 说明 |
+|----|------|
+| 10 | 派单 |
+| 20 | 取消申请 |
+| 30 | 改派申请 |
+| 40 | **跟单** |
+| 50 | 领单超时 |
+| 60 | 房屋 |
+| 80 | 投诉 |
+
+---
+
+## 异常处理
+
+| 错误类型 | 处理方式 |
+|---------|---------|
+| .auth 文件不存在或 AK 未配置 | 提示用户配置 .auth 文件 |
+| 查询跟单详情失败 | 展示错误信息，检查跟单ID和工单ID是否正确 |
+| 创建任务失败 | 展示返回的 msg 字段错误信息 |
+| 必填参数缺失 | 使用 ask_user_question 询问用户 |
+
+---
+
+## 输出格式
+
+**成功：**
+```
+Step 1: 权限获取成功
+Step 2: 查询跟单详情成功
+  - 跟单ID: 127325906441705088
+  - 工单ID: 6127325899314773120
+  - 跟单内容: 挂起申请
+  - 跟单状态: 待处理
+
+Step 3: 转换入参
+{
+  "taskItemId": 1202,
+  "bizId": 127325906441705088,
+  "bizSource": 40,
+  "bizOrderType": 2,
+  "bizOrderId": 6127325899314773120,
+  "cityId": 500100,
+  "cityName": "重庆市",
+  "subCompanyId": 10041,
+  "subCompanyName": "重庆公司",
+  "engineerId": 45429907,
+  "engineerName": "陈志强",
+  "userTelephone": "19400001027",
+  "plat": 10
+}
+
+========== 创建成功 ==========
+跟单任务ID: 127330734477002620
+SUCCESS: trackTaskId=127330734477002620
+```
+
+**失败：**
+```
+ERROR: 查询跟单详情失败 - 未找到该跟单
+```
+或
+```
+ERROR: 创建失败 - 任务项ID不存在
 ```

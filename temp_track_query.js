@@ -6,8 +6,7 @@ authContent.split('\n').forEach(line => {
   if (idx > 0) authConfig[line.substring(0, idx).trim()] = line.substring(idx + 1).trim();
 });
 
-const trackWorkId = '127212582539728512';
-
+const trackWorkId = '127320898734233217';
 fetch('https://test3-track.xiujiadian.com/amis/track/list', {
   method: 'POST',
   headers: {
