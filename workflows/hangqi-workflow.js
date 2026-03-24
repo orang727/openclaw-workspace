@@ -77,8 +77,9 @@ function printSummary(success, failAt, failReason, steps) {
 }
 
 // ==================== 认证配置加载 ====================
+// 统一使用 .auth/xiujiadian 文件
 async function loadAuthConfig(skillName) {
-  const authPath = `${SKILLS_DIR}/${skillName}/.auth`;
+  const authPath = 'C:/Users/admin/.openclaw/workspace/.auth/xiujiadian';
   try {
     const fs = require('fs');
     const authContent = fs.readFileSync(authPath, 'utf8');
@@ -285,19 +286,27 @@ async function skill2_recognizeIntent(audioText, audioUrl) {
     const category = intentionData.intention?.category || '';
     const confidenceScore = intentionData.intention?.confidence_score || intentionData.intention?.Confidence_score || 0;
     
-    // 映射到三种意图
+    // 映射到四种意图
     let intentName = 'other';
     if (category.includes('确认上门') || category.includes('确定上门') || category.includes('上门时间')) {
-      intentName = 'confirm_visit';
-    } else if (category.includes('不需要') || category.includes('取消') || category.includes('询价')) {
-      intentName = 'price_or_cancel';
+      intentName = 'confirm_visit';  // 确认上门
+    } else if (category.includes('询价') || category.includes('报价') || category.includes('价格')) {
+      intentName = 'price_query';   // 用户询价
+    } else if (category.includes('不需要') || category.includes('取消') || category.includes('不做了')) {
+      intentName = 'cancel';        // 取消
     }
     
     addLog('SUCCESS', `Skill2 完成: category=${category}, intent=${intentName}, confidence=${confidenceScore}`);
+    // 置信度低于阈值时，触发创建跟单
+    if (confidenceScore < 0.75) {
+      intentName = 'price_query';
+      addLog('INFO', `置信度低于阈值0.75，触发创建跟单任务`);
+    }
+
     return {
       intent_name: intentName,
       confidence: confidenceScore,
-      need_human_review: confidenceScore < 0.75
+      need_human_review: false  // 低于阈值时自动触发创建跟单，不再人工复核
     };
     
   } catch (e) {
@@ -631,7 +640,7 @@ async function runWorkflow(trackWorkId) {
     const skill3Result = await skill3_handleTrack(skill1Result.workId, trackWorkId, intentName);
     steps[steps.length - 1] = { ...steps[steps.length - 1], status: 'completed', result: skill3Result };
     
-    // Skill 4/5/6: 根据意图路由
+    // Skill 4/5/6: 根据意图路由（四种）
     let finalResult;
     
     if (intentName === 'confirm_visit') {
@@ -642,8 +651,8 @@ async function runWorkflow(trackWorkId) {
       steps[steps.length - 1] = { ...steps[steps.length - 1], status: 'completed', result: skill4Result };
       finalResult = skill4Result;
       
-    } else if (intentName === 'price_or_cancel') {
-      // 用户询价/取消 → 取消
+    } else if (intentName === 'cancel') {
+      // 取消 → 取消工单
       currentStep++;
       steps.push({ step: currentStep, name: 'Skill5: 取消', status: 'running' });
       const skill5Result = await skill5_cancelWork(skill1Result.workId);
@@ -651,7 +660,7 @@ async function runWorkflow(trackWorkId) {
       finalResult = skill5Result;
       
     } else {
-      // 其他意图 → 创建跟单
+      // 用户询价 / 其他意图 → 创建跟单
       currentStep++;
       steps.push({ step: currentStep, name: 'Skill6: 生成跟单', status: 'running' });
       const skill6Result = await skill6_createTrackTask(skill1Result.workId, intentName);
