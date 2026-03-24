@@ -17,7 +17,7 @@ Skill 接收以下入参：
 本 Skill 统一使用 AK Bearer Token 认证：
 
 - **track.xiujiadian.com** → AK Bearer Token（跟单列表查询）
-- **admin.xiujiadian.com** → AK Bearer Token（工单取消接口）
+- **test-ais.xiujiadian.com** → AK Bearer Token（工单取消接口）
 
 从 `.auth` 文件读取 `AK` 字段，请求头：`Authorization: Bearer <AK>`
 
@@ -50,7 +50,7 @@ authContent.split('\n').forEach(line => {
 |--------|--------|------|
 | `{skillDir}` | 本 SKILL.md 文件所在目录的绝对路径 | 用于定位 `.auth` 等配置文件 |
 | `{trackWorkId}` | 用户提供的跟单ID | 从用户输入中获取 |
-| `{workId}` | Step 2 查出的工单号 | 从接口返回中提取 |
+| `{workId}` | Step 2 查出的 servWorkId | 从接口返回中提取 |
 
 ## 执行步骤
 
@@ -86,8 +86,11 @@ fetch('https://test3-track.xiujiadian.com/amis/track/list', {
   body: JSON.stringify({ trackWorkId })
 }).then(r => r.json()).then(d => {
   if (d.status === 0 && d.data && d.data.items && d.data.items.length > 0) {
-    const workId = d.data.items[0].workId;
-    console.log('WORK_ID=' + workId);
+    const item = d.data.items[0];
+    const servWorkId = item.workId;
+    const servOrderId = item.servOrderId;
+    console.log('WORK_ID=' + servWorkId);
+    console.log('SERV_ORDER_ID=' + servOrderId);
   } else {
     console.log('ERROR: 未找到该跟单ID对应的工单，msg=' + (d.msg || ''));
   }
@@ -99,12 +102,12 @@ node /tmp/cancel_track_query.js
 ```
 
 **解析结果：**
-- 如果输出 `WORK_ID=xxx`，提取 workId 进入 Step 3
+- 如果输出 `WORK_ID=xxx` 和 `SERV_ORDER_ID=xxx`，提取 servWorkId 和 servOrderId 进入 Step 3
 - 如果输出 `ERROR:`，将错误信息展示给用户并终止流程
 
 ### Step 3: 调用工单取消接口
 
-使用 `run_in_terminal` 执行以下 Node.js 脚本（将脚本写到临时文件再执行），将 `{workId}` 替换为 Step 2 获取到的工单号：
+使用 `run_in_terminal` 执行以下 Node.js 脚本（将脚本写到临时文件再执行），将 `{workId}` 替换为 Step 2 获取到的 servWorkId，将 `{servOrderId}` 替换为 Step 2 获取到的 servOrderId：
 
 ```javascript
 // /tmp/cancel_work.js
@@ -119,17 +122,22 @@ authContent.split('\n').forEach(line => {
 });
 
 const servWorkId = '{workId}';
+const servOrderId = '{servOrderId}';
 
-fetch('https://test3-admin.xiujiadian.com/bfm-serv-work/cancel/submitCancelApply', {
+fetch('https://test-ais.xiujiadian.com/ratel-api/serv-work-general-agg/cancelApplyModifyRemoteService/submitCancelApply', {
   method: 'POST',
   headers: {
     'Content-Type': 'application/json',
     'Authorization': 'Bearer ' + authConfig.AK
   },
   body: JSON.stringify({
-    servWorkId,
-    applySource: 11,
-    reasonId: 217
+    applySource: 17,
+    operator: '系统',
+    operatorId: 1,
+    operatorIdentity: 1,
+    reasonId: 217,
+    servOrderId,
+    servWorkId
   })
 }).then(r => r.text()).then(text => {
   console.log(text);

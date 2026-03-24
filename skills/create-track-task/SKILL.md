@@ -97,29 +97,46 @@ GET https://test3-track.xiujiadian.com/amis/track/detail?trackWorkId={trackWorkI
 
 ## Step 3: 转换入参 & 创建跟单任务
 
+> ⚠️ **强制约束 - 必须严格遵守以下规则**：
+> - **禁止跳过 Step 2**：必须先查询跟单详情获取完整数据，再构造请求体
+> - **禁止自行添加字段**：请求体中不得包含 `sourceTrackId`、`content`、`level` 等 SKILL 中未定义的字段
+> - **bizId 必须使用 trackWorkId**：禁止使用 taskItemId 或其他值！
+> - **bizSource 必须使用固定值 40**：禁止使用 11、10 等其他值！
+> - **workId 必须映射为 bizOrderId**：不得直接作为顶层字段传递
+
 ### 字段映射规则
 
-| 创建任务入参 (TrackTaskCreateDIO) | 来源 | 说明 |
-|----------------------------------|------|------|
-| **taskItemId** | 用户指定 | 任务项ID（必填） |
-| **bizId** | trackWorkId | 跟单ID作为业务ID |
-| **bizSource** | 固定值: 40 | 业务来源=跟单 |
-| **bizOrderType** | 固定值: 2 | 业务单据类型=服务工单 |
-| **bizOrderId** | workId | 工单ID |
-| **cityId** | cityId | 城市ID（必填） |
-| **cityName** | cityName | 城市名称 |
-| **subCompanyId** | companyId | 子公司ID |
-| **subCompanyName** | companyName | 子公司名称 |
-| **engineerId** | engineerId | 工程师ID |
-| **engineerName** | engineerName | 工程师名称 |
-| **userTelephone** | engineerPhone | 手机号（必填） |
-| **plat** | 固定值: 10 | 平台（必填） |
+| 创建任务入参 (TrackTaskCreateDIO) | 来源            | 说明          |
+| --------------------------- | ------------- | ----------- |
+| **taskItemId**              | 用户指定          | 任务项ID（必填）   |
+| **bizId**                   | trackWorkId   | 跟单ID作为业务ID  |
+| **bizSource**               | 固定值: 40       | 业务来源=跟单     |
+| **bizOrderType**            | 固定值: 2        | 业务单据类型=服务工单 |
+| **bizOrderId**              | workId        | 工单ID        |
+| **cityId**                  | cityId        | 城市ID（必填）    |
+| **cityName**                | cityName      | 城市名称        |
+| **subCompanyId**            | companyId     | 子公司ID       |
+| **subCompanyName**          | companyName   | 子公司名称       |
+| **engineerId**              | engineerId    | 工程师ID       |
+| **engineerName**            | engineerName  | 工程师名称       |
+| **userTelephone**           | engineerPhone | 手机号（必填）     |
+| **plat**                    | 固定值: 10       | 平台（必填）      |
 
 ### 创建任务 API 端点
 
 ```
 POST https://test-ais.xiujiadian.com/ratel-api/biz-twd/trackTaskModifyRemoteService/addTrackTask
 ```
+
+### ⚠️ 请求体校验清单（调用 API 前必须逐项核对）
+
+- [ ] `taskItemId` = 用户指定的 taskItemId
+- [ ] `bizId` = **trackWorkId**（跟单ID）← **禁止使用 taskItemId！**
+- [ ] `bizSource` = **40**（固定值）← **禁止使用其他值（如 11、10 等）！**
+- [ ] `bizOrderType` = **2**（固定值）
+- [ ] `bizOrderId` = **workId**（工单ID）← 不是顶层 workId 字段！
+- [ ] `cityId`、`cityName`、`subCompanyId`、`subCompanyName`、`engineerId`、`engineerName`、`userTelephone`、`plat` 均从 **Step 2 跟单详情响应**中获取
+- [ ] 请求体中 **不包含** `sourceTrackId`、`content`、`level` 等未定义字段
 
 ### 请求体示例
 

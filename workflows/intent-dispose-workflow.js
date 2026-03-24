@@ -109,7 +109,7 @@ const INTENT_LABELS = {
   'type4': '其他意图'
 };
 
-async function skill0_routeResult(trackWorkId, intentType, taskItemId) {
+async function skill0_routeResult(trackWorkId, intentType, taskItemId = '1202') {
   addLog('process', '开始执行 Skill0: 路由结果', { trackWorkId, intentType, taskItemId });
 
   // 参数校验
@@ -128,6 +128,8 @@ async function skill0_routeResult(trackWorkId, intentType, taskItemId) {
   const authConfig = await loadAuthConfig('get-call-record');
   if (!authConfig) throw new Error('认证配置加载失败');
 
+  addLog('request', '查询工单号', { url: 'https://test3-track.xiujiadian.com/amis/track/list', body: { trackWorkId } });
+
   const response = await fetch('https://test3-track.xiujiadian.com/amis/track/list', {
     method: 'POST',
     headers: {
@@ -137,22 +139,56 @@ async function skill0_routeResult(trackWorkId, intentType, taskItemId) {
     body: JSON.stringify({ trackWorkId })
   });
 
-  const xmlText = await response.text();
-  const workIdMatch = xmlText.match(/<workId>(\d+)<\/workId>/);
-  const workId = workIdMatch ? workIdMatch[1] : null;
+  const responseText = await response.text();
+  addLog('response', '跟单列表响应', { response: responseText.substring(0, 500) });
 
-  addLog('info', `路由映射完成`, { intentType, intentLabel, routeResult, workId, taskItemId });
+  // 解析响应获取 workId 和 servOrderId（支持 JSON 和 XML 两种格式）
+  let workId = null;
+  let servOrderId = null;
+  try {
+    // 判断是 JSON 还是 XML 响应
+    if (responseText.trim().startsWith('<')) {
+      // XML 格式解析
+      const workIdMatch = responseText.match(/<workId>(\d+)<\/workId>/);
+      const servOrderIdMatch = responseText.match(/<servOrderId>(\d+)<\/servOrderId>/);
+      if (workIdMatch) {
+        workId = workIdMatch[1];
+        addLog('info', `成功获取工单号(XML解析)`, { workId });
+      } else {
+        addLog('warn', `XML响应中未找到workId`, { response: responseText.substring(0, 200) });
+      }
+      if (servOrderIdMatch) {
+        servOrderId = servOrderIdMatch[1];
+        addLog('info', `成功获取服务订单号(XML解析)`, { servOrderId });
+      }
+    } else {
+      // JSON 格式解析
+      const data = JSON.parse(responseText);
+      if (data.status === 0 && data.data && data.data.items && data.data.items.length > 0) {
+        workId = data.data.items[0].workId;
+        servOrderId = data.data.items[0].servOrderId;
+        addLog('info', `成功获取工单号和订单号(JSON解析)`, { workId, servOrderId });
+      } else {
+        addLog('warn', `未找到该跟单ID对应的工单`, { msg: data.msg || '未知错误' });
+      }
+    }
+  } catch (e) {
+    addLog('error', `解析响应失败: ${e.message}`, { response: responseText.substring(0, 200) });
+  }
+
+  addLog('info', `路由映射完成`, { intentType, intentLabel, routeResult, workId, servOrderId, taskItemId });
 
   const intentResult = {
     category: intentLabel,
-    intent: routeResult === '确认上门' ? 'confirm_visit' : 
+    intent: routeResult === '确认上门' ? 'confirm_visit' :
            routeResult === '取消' ? 'price_or_cancel' : 'other',
     confidence: 1.0
   };
 
-  addLog('success', 'Skill0 完成', { 
-    routeResult, 
-    workId, 
+  addLog('success', 'Skill0 完成', {
+    routeResult,
+    workId,
+    servOrderId,
     intent: intentResult.intent,
     intentType,
     taskItemId
@@ -161,6 +197,7 @@ async function skill0_routeResult(trackWorkId, intentType, taskItemId) {
   return {
     trackWorkId,
     workId,
+    servOrderId,
     routeResult,
     intentResult,
     intentType,
@@ -287,26 +324,35 @@ async function skill2_modifyDuty(trackWorkId, workId, intentResult) {
 }
 
 // ==================== Skill3: 工单取消 ====================
-async function skill3_cancelWork(trackWorkId, workId, intentResult) {
-  addLog('process', '开始执行 Skill3: 工单取消', { trackWorkId, workId });
+// 【修复】使用 SKILL.md cancel-work 中定义的 API 和参数
+async function skill3_cancelWork(trackWorkId, workId, intentResult, servOrderId) {
+  addLog('process', '开始执行 Skill3: 工单取消', { trackWorkId, workId, servOrderId });
 
   // MVP规则：取消原因固定为"用户不需要了"
   const cancelReason = '用户不需要了';
   addLog('info', `取消规则: 固定原因 "${cancelReason}"`);
 
-  // 调用真实取消接口
+  // 【修复】使用 SKILL.md cancel-work 中定义的认证和 API
   const authConfig = await loadAuthConfig('cancel-work');
   if (!authConfig) throw new Error('认证配置加载失败');
 
+  // 【修复】使用 SKILL.md 定义的请求参数
   const body = {
     servWorkId: workId,
-    applySource: 11,
-    reasonId: 217
+    servOrderId: servOrderId,
+    applySource: 17,           // SKILL.md 固定值
+    operator: '系统',           // SKILL.md 固定值
+    operatorId: 1,              // SKILL.md 固定值
+    operatorIdentity: 1,       // SKILL.md 固定值
+    reasonId: 217               // SKILL.md 固定值
   };
 
-  addLog('request', '提交工单取消', { url: 'https://test3-admin.xiujiadian.com/bfm-serv-work/cancel/submitCancelApply', body });
+  // 【修复】使用 SKILL.md 定义的 API 地址
+  const apiUrl = 'https://test-ais.xiujiadian.com/ratel-api/serv-work-general-agg/cancelApplyModifyRemoteService/submitCancelApply';
 
-  const response = await fetch('https://test3-admin.xiujiadian.com/bfm-serv-work/cancel/submitCancelApply', {
+  addLog('request', '提交工单取消', { url: apiUrl, body });
+
+  const response = await fetch(apiUrl, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -344,29 +390,73 @@ async function skill3_cancelWork(trackWorkId, workId, intentResult) {
 }
 
 // ==================== Skill4: 生成跟单任务 ====================
+// 【修复】使用 SKILL.md create-track-task 中定义的 API 和参数
 async function skill4_createTrackTask(trackWorkId, workId, intentResult, taskItemId) {
   addLog('process', '开始执行 Skill4: 生成跟单任务', { trackWorkId, workId, taskItemId });
 
-  // 传入的taskItemId作为bizId
-  const bizId = taskItemId;
-
-  // 调用真实创建跟单接口
+  // 【修复】Step 1: 查询跟单详情（获取城市、公司、工程师等信息）
   const authConfig = await loadAuthConfig('create-track-task');
   if (!authConfig) throw new Error('认证配置加载失败');
 
+  addLog('request', '查询跟单详情', { url: `https://test3-track.xiujiadian.com/amis/track/detail?trackWorkId=${trackWorkId}&workId=${workId}` });
+
+  const detailRes = await fetch(`https://test3-track.xiujiadian.com/amis/track/detail?trackWorkId=${trackWorkId}&workId=${workId}`, {
+    method: 'GET',
+    headers: {
+      'Authorization': 'Bearer ' + authConfig.AK
+    }
+  });
+
+  const detailText = await detailRes.text();
+  addLog('response', '跟单详情响应', { response: detailText.substring(0, 500) });
+
+  // 解析跟单详情（支持 XML 格式）
+  let trackDetail = null;
+  try {
+    const getXmlValue = (xml, tag) => {
+      const match = xml.match(new RegExp(`<${tag}>([^<]*)</${tag}`));
+      return match ? match[1] : '';
+    };
+    trackDetail = {
+      trackWorkId: getXmlValue(detailText, 'trackWorkId'),
+      workId: getXmlValue(detailText, 'workId'),
+      cityId: getXmlValue(detailText, 'cityId'),
+      cityName: getXmlValue(detailText, 'cityName'),
+      companyId: getXmlValue(detailText, 'companyId'),
+      companyName: getXmlValue(detailText, 'companyName'),
+      engineerId: getXmlValue(detailText, 'engineerId'),
+      engineerName: getXmlValue(detailText, 'engineerName'),
+      engineerPhone: getXmlValue(detailText, 'engineerPhone')
+    };
+    addLog('info', '跟单详情解析成功', trackDetail);
+  } catch (e) {
+    addLog('error', '解析跟单详情失败: ' + e.message);
+    return { success: false, error: '解析跟单详情失败' };
+  }
+
+  // 【修复】Step 2: 使用 SKILL.md 定义的参数构建请求体
   const body = {
-    workId,
-    sourceTrackId: trackWorkId,
-    bizId: bizId,
-    taskItemId: bizId,
-    bizSource: 11,
-    content: `自动生成：${intentResult.category || '其他意图'}`,
-    level: 2
+    taskItemId: parseInt(taskItemId) || 1202,
+    bizId: parseInt(trackWorkId),           // SKILL.md: bizId = trackWorkId
+    bizSource: 40,                          // SKILL.md: 固定值 40（跟单）
+    bizOrderType: 2,                        // SKILL.md: 固定值 2（服务工单）
+    bizOrderId: parseInt(workId),           // SKILL.md: bizOrderId = workId
+    cityId: parseInt(trackDetail.cityId) || 0,
+    cityName: trackDetail.cityName || '',
+    subCompanyId: parseInt(trackDetail.companyId) || 0,
+    subCompanyName: trackDetail.companyName || '',
+    engineerId: parseInt(trackDetail.engineerId) || 0,
+    engineerName: trackDetail.engineerName || '',
+    userTelephone: trackDetail.engineerPhone || '',
+    plat: 10                                // SKILL.md: 固定值 10
   };
 
-  addLog('request', '生成新跟单任务', { url: 'https://test-ais.xiujiadian.com/ratel-api/biz-twd/trackTaskModifyRemoteService/addTrackTask', body });
+  // 【修复】使用 SKILL.md 定义的 API 地址
+  const apiUrl = 'https://test-ais.xiujiadian.com/ratel-api/biz-twd/trackTaskModifyRemoteService/addTrackTask';
 
-  const response = await fetch('https://test-ais.xiujiadian.com/ratel-api/biz-twd/trackTaskModifyRemoteService/addTrackTask', {
+  addLog('request', '生成新跟单任务', { url: apiUrl, body });
+
+  const response = await fetch(apiUrl, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -381,23 +471,26 @@ async function skill4_createTrackTask(trackWorkId, workId, intentResult, taskIte
   // 解析响应
   let isSuccess = false;
   let newTrackId = null;
+  let msg = '未知响应';
   try {
     const data = JSON.parse(resultText);
+    msg = data.msg || data.message || '';
     if (data.status === 0 || data.success === true) {
       isSuccess = true;
       newTrackId = data.data || data.trackId || 'T' + Date.now();
     } else {
-      addLog('error', 'Skill4 失败: ' + (data.message || data.msg || '创建跟单失败'), { response: data });
+      addLog('error', 'Skill4 失败: ' + msg, { response: data });
     }
   } catch (e) {
     addLog('error', 'Skill4 失败: 响应解析失败', { response: resultText.substring(0, 200) });
+    msg = resultText.substring(0, 200);
   }
 
   if (isSuccess) {
     addLog('success', 'Skill4 完成: 新跟单已生成', { newTrackId });
   }
 
-  return { success: isSuccess, newTrackId };
+  return { success: isSuccess, newTrackId, msg };
 }
 
 // ==================== 主流程 ====================
@@ -426,7 +519,11 @@ async function runWorkflow(trackWorkId, intentType, taskItemId, useSandbox = fal
     // 分支处理
     currentStep++;
     let branchResult = null;
-    if (routeData.routeResult === '确认上门') {
+    // type2 (用户询价) 特殊处理：Skill1(已执行) → SKill4 生成跟单任务
+    if (routeData.intentType === 'type2') {
+      steps.push({ step: currentStep, name: 'Skill4: 生成跟单任务', status: 'running' });
+      branchResult = await skill4_createTrackTask(trackWorkId, routeData.workId, routeData.intentResult, routeData.taskItemId);
+    } else if (routeData.routeResult === '确认上门') {
       steps.push({ step: currentStep, name: 'Skill2: 工单改约', status: 'running' });
       branchResult = await skill2_modifyDuty(trackWorkId, routeData.workId, routeData.intentResult, routeData.taskItemId);
     } else if (routeData.routeResult === '取消') {
