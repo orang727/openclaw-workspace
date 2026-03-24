@@ -236,6 +236,12 @@ async function skill1_getCallRecord(trackWorkId) {
 async function skill2_recognizeIntent(audioText, audioUrl) {
   addLog('PROCESS', `开始执行 Skill2: 意图识别`, { audioUrl: audioUrl ? '有' : '无' });
   
+  const authConfig = await loadAuthConfig('recording-intention');
+  if (!authConfig) {
+    addLog('ERROR', '认证配置加载失败');
+    throw new Error('认证配置加载失败');
+  }
+  
   if (!audioUrl) {
     addLog('ERROR', '无录音URL');
     return { intent_name: 'other', confidence: 0, need_human_review: true };
@@ -252,7 +258,7 @@ async function skill2_recognizeIntent(audioText, audioUrl) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'ak': 'Bearer x76utyhsqdtirjcpp12sp9n2'
+        'Authorization': 'Bearer ' + authConfig.AK
       },
       body: JSON.stringify(requestBody)
     });
@@ -416,19 +422,157 @@ async function skill3_handleTrack(workId, trackWorkId, intentName) {
   return { success: true, msg };
 }
 
-// Skill 4: 改约（未实现）
+// Skill 4: 改约
 async function skill4_modifyDutyTime(workId) {
-  throw new Error('Skill4 改约功能未实现，请先实现实际API调用');
+  addLog('PROCESS', `开始执行 Skill4: 改约`, { workId });
+
+  const authConfig = await loadAuthConfig('modify-duty-time');
+  if (!authConfig) {
+    addLog('ERROR', '认证配置加载失败');
+    throw new Error('认证配置加载失败');
+  }
+
+  // 计算新预约时间（当天+2天 09:00）
+  const now = new Date();
+  now.setDate(now.getDate() + 2);
+  now.setHours(9, 0, 0, 0);
+  const newTime = now.toISOString().replace('T', ' ').substring(0, 19);
+  addLog('INFO', `计算新预约时间 = ${newTime}`);
+
+  const body = {
+    servWorkId: workId,
+    appointmentTime: newTime,
+    modifySource: 11
+  };
+
+  addLog('REQUEST', '提交改约', {
+    url: 'https://test3-admin.xiujiadian.com/bfm-serv-work/serv/work/modifyAppointmentTime',
+    body
+  });
+
+  const response = await fetch('https://test3-admin.xiujiadian.com/bfm-serv-work/serv/work/modifyAppointmentTime', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer ' + authConfig.AK
+    },
+    body: JSON.stringify(body)
+  });
+
+  const xmlText = await response.text();
+  addLog('RESPONSE', '改约响应', { xml: xmlText.substring(0, 500) });
+
+  const statusMatch = xmlText.match(/<status>(\d+)<\/status>/);
+  const msgMatch = xmlText.match(/<msg>([^<]*)<\/msg>/);
+
+  const status = statusMatch ? statusMatch[1] : '-1';
+  const msg = msgMatch ? msgMatch[1] : '未知错误';
+
+  if (status !== '0') {
+    addLog('ERROR', `改约失败: ${msg}`);
+    return { success: false, msg };
+  }
+
+  addLog('SUCCESS', `Skill4 完成: 改约成功`);
+  return { success: true, newTime };
 }
 
-// Skill 5: 取消（未实现）
+// Skill 5: 取消工单
 async function skill5_cancelWork(workId) {
-  throw new Error('Skill5 取消工单功能未实现，请先实现实际API调用');
+  addLog('PROCESS', `开始执行 Skill5: 取消工单`, { workId });
+
+  const authConfig = await loadAuthConfig('cancel-work');
+  if (!authConfig) {
+    addLog('ERROR', '认证配置加载失败');
+    throw new Error('认证配置加载失败');
+  }
+
+  const body = {
+    servWorkId: workId,
+    applySource: 11,
+    reasonId: 217,
+    cancelReason: '用户不需要服务'
+  };
+
+  addLog('REQUEST', '提交取消', {
+    url: 'https://test3-admin.xiujiadian.com/bfm-serv-work/cancel/submitCancelApply',
+    body
+  });
+
+  const response = await fetch('https://test3-admin.xiujiadian.com/bfm-serv-work/cancel/submitCancelApply', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer ' + authConfig.AK
+    },
+    body: JSON.stringify(body)
+  });
+
+  const xmlText = await response.text();
+  addLog('RESPONSE', '取消响应', { xml: xmlText.substring(0, 500) });
+
+  const statusMatch = xmlText.match(/<status>(\d+)<\/status>/);
+  const msgMatch = xmlText.match(/<msg>([^<]*)<\/msg>/);
+
+  const status = statusMatch ? statusMatch[1] : '-1';
+  const msg = msgMatch ? msgMatch[1] : '未知错误';
+
+  if (status !== '0') {
+    addLog('ERROR', `取消失败: ${msg}`);
+    return { success: false, msg };
+  }
+
+  addLog('SUCCESS', `Skill5 完成: 取消成功`);
+  return { success: true, msg };
 }
 
-// Skill 6: 创建跟单任务（未实现）
+// Skill 6: 创建跟单任务
 async function skill6_createTrackTask(workId, intentName) {
-  throw new Error('Skill6 创建跟单任务功能未实现，请先实现实际API调用');
+  addLog('PROCESS', `开始执行 Skill6: 创建跟单任务`, { workId, intentName });
+
+  const authConfig = await loadAuthConfig('create-track-task');
+  if (!authConfig) {
+    addLog('ERROR', '认证配置加载失败');
+    throw new Error('认证配置加载失败');
+  }
+
+  const body = {
+    workId,
+    trackContentId: 1191,
+    trackType: 1001,
+    trackRemark: `AI识别意图: ${intentName}`
+  };
+
+  addLog('REQUEST', '创建跟单', {
+    url: 'https://test3-track.xiujiadian.com/amis/track/create',
+    body
+  });
+
+  const response = await fetch('https://test3-track.xiujiadian.com/amis/track/create', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer ' + authConfig.AK
+    },
+    body: JSON.stringify(body)
+  });
+
+  const xmlText = await response.text();
+  addLog('RESPONSE', '创建响应', { xml: xmlText.substring(0, 500) });
+
+  const statusMatch = xmlText.match(/<status>(\d+)<\/status>/);
+  const msgMatch = xmlText.match(/<msg>([^<]*)<\/msg>/);
+
+  const status = statusMatch ? statusMatch[1] : '-1';
+  const msg = msgMatch ? msgMatch[1] : '未知错误';
+
+  if (status !== '0') {
+    addLog('ERROR', `创建跟单失败: ${msg}`);
+    return { success: false, msg };
+  }
+
+  addLog('SUCCESS', `Skill6 完成: 创建成功`);
+  return { success: true, msg };
 }
 
 // ==================== 主工作流 ====================
