@@ -205,122 +205,181 @@ async function skill0_routeResult(trackWorkId, intentType, taskItemId = '1202') 
   };
 }
 
-// ==================== Skill1: 跟单处理 ====================
-async function skill1_handleTrack(trackWorkId, workId, intentResult) {
-  addLog('process', '开始执行 Skill1: 跟单处理', { trackWorkId, workId, intent: intentResult.intent });
-
-  const authConfig = await loadAuthConfig('handle-track-work');
-  if (!authConfig) throw new Error('认证配置加载失败');
-
-  const handleRemark = intentResult.category || 'AI自动处理';
-  const body = {
-    workId,
-    trackWorkId,
-    trackContentId: 1191,
-    handleOptionList: [
-      {
-        optionId: 111,
-        optionName: '挂起申请驳回',
-        optionLevel: 0
-      }
-    ],
-    handleJumpType: 0,
-    handleRemark,
-    isCompleteTrack: 2
-  };
-
-  addLog('request', '提交跟单处理', { url: 'https://test3-track.xiujiadian.com/amis/track/save/newHandle', body });
-  const response = await fetch('https://test3-track.xiujiadian.com/amis/track/save/newHandle', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': 'Bearer ' + authConfig.AK
-    },
-    body: JSON.stringify(body)
-  });
-
-  const xmlText = await response.text();
-  addLog('response', '跟单处理响应', { xml: xmlText.substring(0, 500) });
-
-  // 解析响应
-  const statusMatch = xmlText.match(/<status>(\d+)<\/status>/);
-  const msgMatch = xmlText.match(/<msg>([^<]*)<\/msg>/);
-  const status = statusMatch ? statusMatch[1] : 'unknown';
-  const msg = msgMatch ? msgMatch[1] : '未知响应';
-
-  // status=100 表示跟单已完结，业务上不可再处理
-  const isCompleted = status === '100';
-  
-  if (isCompleted) {
-    addLog('warn', 'Skill1 警告: 跟单已完结，无法重复处理', { status, msg });
-  } else if (status === '0') {
-    addLog('success', 'Skill1 完成: 跟单处理成功', { status, msg });
-  } else {
-    addLog('error', 'Skill1 失败: ' + msg, { status });
-  }
-
-  return { success: !isCompleted, status, msg };
-}
-
-// ==================== Skill2: 工单改约 ====================
+// ==================== Skill2: 工单改约 (按 SKILL.md modify-duty-time 定义重写) ====================
 async function skill2_modifyDuty(trackWorkId, workId, intentResult) {
   addLog('process', '开始执行 Skill2: 工单改约', { trackWorkId, workId });
 
-  // MVP规则：预约时间 = 当前日期+2天 09:00
-  const now = new Date();
-  now.setDate(now.getDate() + 2);
-  now.setHours(9, 0, 0, 0);
-  const appointmentTime = now.toISOString().replace('T', ' ').substring(0, 19);
-
-  addLog('info', `改约规则: 预约时间 = ${appointmentTime}`);
-
-  // 调用改约接口
   const authConfig = await loadAuthConfig('modify-duty-time');
   if (!authConfig) throw new Error('认证配置加载失败');
 
-  const body = {
-    servWorkId: workId,
-    appointmentTime: appointmentTime,
-    modifySource: 11
-  };
-
-  addLog('request', '提交工单改约', { url: 'https://test3-admin.xiujiadian.com/bfm-serv-work/serv/work/modifyAppointmentTime', body });
-
-  // 调用真实改约接口
-  const response = await fetch('https://test3-admin.xiujiadian.com/bfm-serv-work/serv/work/modifyAppointmentTime', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': 'Bearer ' + authConfig.AK
-    },
-    body: JSON.stringify(body)
-  });
-
-  const resultText = await response.text();
-  addLog('response', '改约响应', { result: resultText.substring(0, 500) });
-
-  // 解析响应，检查是否成功
-  let isSuccess = false;
   try {
-    const data = JSON.parse(resultText);
-    const status = data?.AMISResponseDTO?.status || data?.status;
-    const msg = data?.AMISResponseDTO?.msg || data?.msg || data?.message;
+    // Step 1: 登录获取 sessionId
+    addLog('process', 'Step1: 登录获取 sessionId');
 
-    if (status == 0) {
-      isSuccess = true;
-      addLog('success', 'Skill2 完成: 工单已改约', { appointmentTime });
-    } else {
-      addLog('error', 'Skill2 失败: ' + msg, { response: data });
+    const loginRes = await fetch('https://test3-mcc.xiujiadian.com/cas/login.action', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ staffName: authConfig.username, password: authConfig.password }),
+      redirect: 'manual'
+    });
+
+    if (loginRes.status !== 200 && loginRes.status !== 302) {
+      const loginText = await loginRes.text();
+      addLog('error', '登录失败', { status: loginRes.status, body: loginText });
+      return { success: false, msg: '登录失败' };
     }
+
+    // 提取 cookies
+    const cookies = [];
+    const setCookieHeaders = loginRes.headers.getSetCookie ? loginRes.headers.getSetCookie() : [];
+    if (setCookieHeaders.length > 0) {
+      setCookieHeaders.forEach(c => cookies.push(c.split(';')[0]));
+    } else {
+      loginRes.headers.forEach((value, key) => {
+        if (key.toLowerCase() === 'set-cookie') {
+          cookies.push(value.split(';')[0]);
+        }
+      });
+    }
+
+    // 从 cookie 中提取 sessionId（test3.zmn.id=xxx）
+    let sessionId = '';
+    cookies.forEach(c => {
+      if (c.startsWith('test3.zmn.id=')) {
+        sessionId = c.split('=')[1];
+      }
+    });
+
+    if (!sessionId) {
+      addLog('error', '登录成功但未获取到sessionId');
+      return { success: false, msg: '登录成功但未获取到sessionId' };
+    }
+
+    addLog('info', `获取 sessionId 成功`);
+
+    // Step 2: 使用 sessionId + AK 调用获取人员信息接口
+    addLog('process', 'Step2: 获取人员信息');
+
+    const staffRes = await fetch('https://test-ais.xiujiadian.com/ratel-api/base-mcc/mcStaffForeignListRemoteService/getLoginStaffBySessionId', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + authConfig.AK
+      },
+      body: JSON.stringify({ sessionId })
+    });
+
+    const staffText = await staffRes.text();
+    let staffInfo = { realName: '', deptName: '', deptId: 0, staffId: 0 };
+
+    try {
+      const staffData = JSON.parse(staffText);
+      if (staffData.success === true && staffData.data) {
+        staffInfo = staffData.data;
+        addLog('info', `获取人员信息成功: ${staffInfo.realName}`);
+      } else {
+        addLog('error', '获取人员信息失败', { response: staffData });
+        return { success: false, msg: '获取人员信息失败' };
+      }
+    } catch (e) {
+      // 尝试从 XML 提取
+      const realName = staffText.match(/<realName>([^<]+)<\/realName>/);
+      const deptName = staffText.match(/<deptName>([^<]+)<\/deptName>/);
+      const deptId = staffText.match(/<deptId>([^<]+)<\/deptId>/);
+      const staffIdMatch = staffText.match(/<staffId>([^<]+)<\/staffId>/);
+
+      if (realName && staffIdMatch) {
+        staffInfo = {
+          realName: realName[1],
+          deptName: deptName ? deptName[1] : '',
+          deptId: deptId ? parseInt(deptId[1]) : 0,
+          staffId: staffIdMatch ? parseInt(staffIdMatch[1]) : 0
+        };
+        addLog('info', `获取人员信息成功(从XML解析): ${staffInfo.realName}`);
+      } else {
+        addLog('error', '无法解析人员信息响应', { raw: staffText.substring(0, 500) });
+        return { success: false, msg: '无法解析人员信息响应' };
+      }
+    }
+
+    // Step 3: 修改预约时间
+    addLog('process', 'Step3: 修改预约时间');
+
+    // 格式化时间函数
+    function formatTime(date) {
+      const y = date.getFullYear();
+      const M = String(date.getMonth() + 1).padStart(2, '0');
+      const d = String(date.getDate()).padStart(2, '0');
+      const h = String(date.getHours()).padStart(2, '0');
+      const m = String(date.getMinutes()).padStart(2, '0');
+      const s = String(date.getSeconds()).padStart(2, '0');
+      return `${y}-${M}-${d} ${h}:${m}:${s}`;
+    }
+
+    const now = new Date();
+    const operateTime = formatTime(now);
+
+    // 当天 +2 天后的 09:00
+    const dutyDate = new Date(now);
+    dutyDate.setDate(dutyDate.getDate() + 2);
+    dutyDate.setHours(9, 0, 0, 0);
+    const dutyTime = formatTime(dutyDate);
+
+    const body = {
+      operateTime,
+      servWorkId: workId,
+      operator: staffInfo.realName,
+      operatorDeptName: staffInfo.deptName,
+      dutyTime,
+      operatorDeptId: staffInfo.deptId,
+      operatorId: String(staffInfo.staffId),
+      operatorIdentity: 2
+    };
+
+    addLog('request', '提交改约', {
+      url: 'https://test-ais.xiujiadian.com/ratel-api/serv-work-general-agg/servWorkModifyDutyTimeRemoteService/modifyDutyTime',
+      body
+    });
+
+    const response = await fetch('https://test-ais.xiujiadian.com/ratel-api/serv-work-general-agg/servWorkModifyDutyTimeRemoteService/modifyDutyTime', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + authConfig.AK,
+        'abtag': 'p0342'
+      },
+      body: JSON.stringify(body)
+    });
+
+    const resultText = await response.text();
+    addLog('response', '改约响应', { result: resultText.substring(0, 500) });
+
+    // 解析响应
+    let isSuccess = false;
+    let msg = '未知错误';
+
+    try {
+      const data = JSON.parse(resultText);
+      isSuccess = data.success === true;
+      msg = data.msg || '未知错误';
+    } catch (e) {
+      const statusMatch = resultText.match(/<status>(\d+)<\/status>/);
+      const msgMatch = resultText.match(/<msg>([^<]*)<\/msg>/);
+      isSuccess = statusMatch && statusMatch[1] === '200';
+      msg = msgMatch ? msgMatch[1] : '未知错误';
+    }
+
+    if (isSuccess) {
+      addLog('success', 'Skill2 完成: 工单改约成功', { newDutyTime: dutyTime, operator: staffInfo.realName });
+    } else {
+      addLog('error', 'Skill2 失败: ' + msg);
+    }
+
+    return { success: isSuccess, newDutyTime: dutyTime, operator: staffInfo.realName, msg };
   } catch (e) {
-    if (resultText.includes('403') || resultText.includes('Forbidden')) {
-      addLog('error', 'Skill2 失败: 权限不足', { response: resultText.substring(0, 200) });
-    } else {
-      addLog('error', 'Skill2 失败: ' + e.message, { response: resultText.substring(0, 200) });
-    }
+    addLog('error', 'Skill2 执行异常: ' + e.message);
+    return { success: false, msg: e.message };
   }
-
-  return { success: isSuccess, appointmentTime };
 }
 
 // ==================== Skill3: 工单取消 ====================
@@ -510,26 +569,20 @@ async function runWorkflow(trackWorkId, intentType, taskItemId, useSandbox = fal
     routeData = await skill0_routeResult(trackWorkId, intentType, taskItemId);
     steps[steps.length - 1] = { ...steps[steps.length - 1], status: 'completed', result: routeData };
 
-    // Step 1: 跟单处理（所有分支公共节点）
-    currentStep++;
-    steps.push({ step: currentStep, name: 'Skill1: 跟单处理', status: 'running' });
-    const handleResult = await skill1_handleTrack(trackWorkId, routeData.workId, routeData.intentResult);
-    steps[steps.length - 1] = { ...steps[steps.length - 1], status: 'completed', result: handleResult };
-
-    // 分支处理
+    // 分支处理：直接根据路由结果映射到对应 Skill
     currentStep++;
     let branchResult = null;
-    // type2 (用户询价) 特殊处理：Skill1(已执行) → SKill4 生成跟单任务
-    if (routeData.intentType === 'type2') {
-      steps.push({ step: currentStep, name: 'Skill4: 生成跟单任务', status: 'running' });
-      branchResult = await skill4_createTrackTask(trackWorkId, routeData.workId, routeData.intentResult, routeData.taskItemId);
-    } else if (routeData.routeResult === '确认上门') {
+
+    if (routeData.routeResult === '确认上门') {
+      // type1: 确认上门 → Skill2 工单改约
       steps.push({ step: currentStep, name: 'Skill2: 工单改约', status: 'running' });
-      branchResult = await skill2_modifyDuty(trackWorkId, routeData.workId, routeData.intentResult, routeData.taskItemId);
+      branchResult = await skill2_modifyDuty(trackWorkId, routeData.workId, routeData.intentResult);
     } else if (routeData.routeResult === '取消') {
+      // type3: 取消 → Skill3 工单取消
       steps.push({ step: currentStep, name: 'Skill3: 工单取消', status: 'running' });
-      branchResult = await skill3_cancelWork(trackWorkId, routeData.workId, routeData.intentResult);
+      branchResult = await skill3_cancelWork(trackWorkId, routeData.workId, routeData.intentResult, routeData.servOrderId);
     } else {
+      // type2/type4: 其他意图 → Skill4 生成跟单任务
       steps.push({ step: currentStep, name: 'Skill4: 生成跟单任务', status: 'running' });
       branchResult = await skill4_createTrackTask(trackWorkId, routeData.workId, routeData.intentResult, routeData.taskItemId);
     }

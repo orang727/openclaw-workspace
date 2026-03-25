@@ -15,17 +15,17 @@ metadata:
 
 ## 参数说明
 
-| 参数 | 必选 | 说明 | API 字段 | 示例 |
-|------|------|------|----------|------|
-| 跟单内容ID | 是 | 跟单内容 ID 列表 | trackContentIdList | [1101,1151] |
-| 数据来源 | 否 | 生产或测试，默认为测试 | — | 测试 |
-| 工单号 | 否 | 工单号 | code | 123456789 |
-| 跟单类型 | 否 | 跟单类型值 | trackType | 1 |
-| 跟单状态 | 否 | 1=待处理 2=处理中 3=已完结 | status | 1 |
-| 跟单等级 | 否 | 跟单等级值 | trackLevel | 1 |
-| 发起时间 | 否 | 时间范围，格式 "YYYY-MM-DD,YYYY-MM-DD" | createTime | "2026-03-01,2026-03-21" |
-| 每页条数 | 否 | 默认 10 | perPage | 10 |
-| 页码 | 否 | 默认 1 | page | 1 |
+| 参数     | 必选  | 说明                              | API 字段             | 示例                      |
+| ------ | --- | ------------------------------- | ------------------ | ----------------------- |
+| 跟单内容ID | 是   | 跟单内容 ID 列表                      | trackContentIdList | [1101,1151]             |
+| 数据来源   | 否   | 生产或测试，默认为测试                     | —                  | 测试                      |
+| 工单号    | 否   | 工单号                             | code               | 123456789               |
+| 跟单类型   | 否   | 跟单类型值                           | trackTypeList      | [1001,1002]             |
+| 跟单状态   | 否   | 1=待处理 2=处理中 3=已完结               | trackStatusListStr | [1,2]                   |
+| 跟单等级   | 否   | 跟单等级值                           | trackLevelList     | [1,2]                   |
+| 发起时间   | 否   | 时间范围，格式 "YYYY-MM-DD,YYYY-MM-DD" | createTime         | "2026-03-01,2026-03-21" |
+| 每页条数   | 否   | 默认 10                           | perPage            | 10                      |
+| 页码     | 否   | 默认 1                            | page               | 1                       |
 
 ## 认证说明
 
@@ -114,9 +114,9 @@ try {
 | 用户参数 | JSON 字段 | 类型 |
 |---------|-----------|------|
 | 工单号 | code | Long |
-| 跟单类型 | trackType | Integer |
-| 跟单状态 | status | Integer |
-| 跟单等级 | trackLevel | Integer |
+| 跟单类型 | trackTypeList | List |
+| 跟单状态 | trackStatusListStr | String |
+| 跟单等级 | trackLevelList | List |
 | 发起时间 | createTime | String ("YYYY-MM-DD,YYYY-MM-DD") |
 
 ### Step 3: 读取 AK

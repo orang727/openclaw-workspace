@@ -10,10 +10,8 @@ description: 修改工单预约时间。当运营人员需要修改工单的预�
 ## 入参说明
 
 Skill 接收以下入参：
-- **意图名称**：当前意图的名称
-- **意图判断结果**：意图识别的结果
-- **跟单ID**（trackWorkId）：需要修改预约时间的跟单ID
-- **其他信息**：用户提供的其他补充信息
+- **跟单ID**（trackWorkId）：必填，需要修改预约时间的跟单ID
+- **其他信息**：可选，用户提供的其他补充信息
 
 ## 认证说明
 
@@ -290,13 +288,14 @@ const bodyDict = {
 
 (async () => {
   try {
-    const apiUrl = 'https://test-ais.xiujiadian.com/ratel-api/serv-work-pre-delivery/scheduleModifyRemoteService/modifyDutyTime';
+    const apiUrl = 'https://test-ais.xiujiadian.com/ratel-api/serv-work-general-agg/servWorkModifyDutyTimeRemoteService/modifyDutyTime';
 
     const res = await fetch(apiUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + authConfig.AK
+        'Authorization': 'Bearer ' + authConfig.AK,
+        'abtag': 'p0342'
       },
       body: JSON.stringify(bodyDict)
     });

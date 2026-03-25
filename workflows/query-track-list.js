@@ -29,7 +29,7 @@ async function queryTrackList() {
   
   // 入参
   const trackContentId = 1101;
-  const trackStatus = 1;
+  const trackStatus = '待处理';
   const startTime = '2026-03-23';
   const endTime = '2026-03-23';
   

@@ -211,11 +211,14 @@ const CONFIG = {
     endpoints: {
         trackList: 'https://test3-track.xiujiadian.com/amis/track/list',
         callRecord: 'https://test3-admin.xiujiadian.com/bfm-serv-work/serv/work/listCallRecord',
-        intentAnalyze: 'https://test-ai.xiujiadian.com/zmn-ai-workflow/v1/ad8e7c2049b047ceaeed832dfbd73def/execute_flow',
+        intentAnalyze: 'https://test-ai.xiujiadian.com/zmn-ai-workflow/v1/961296a26366462b9fbef746ae4ea2cf/execute_flow',
         handleTrack: 'https://test3-track.xiujiadian.com/amis/track/save/newHandle',
-        modifyTime: 'https://test3-admin.xiujiadian.com/bfm-serv-work/serv/work/modifyAppointmentTime',
-        cancelWork: 'https://test3-admin.xiujiadian.com/bfm-serv-work/cancel/submitCancelApply',
-        createFollowup: 'https://test3-track.xiujiadian.com/amis/track/create'
+        // 改约 API - 按 SKILL.md modify-duty-time 定义
+        modifyTime: 'https://test-ais.xiujiadian.com/ratel-api/serv-work-general-agg/servWorkModifyDutyTimeRemoteService/modifyDutyTime',
+        // 取消 API - 按 SKILL.md cancel-work 定义
+        cancelWork: 'https://test-ais.xiujiadian.com/ratel-api/serv-work-general-agg/cancelApplyModifyRemoteService/submitCancelApply',
+        // 创建跟单任务 API - 按 SKILL.md create-track-task 定义
+        createFollowup: 'https://test-ais.xiujiadian.com/ratel-api/biz-twd/trackTaskModifyRemoteService/addTrackTask'
     },
     
     // 意图识别 Token
@@ -378,23 +381,22 @@ async function fetchWithRetry(options, body = null, retries = 3, delayMs = 1000)
 
 async function skill1_getCallRecord(trackWorkId) {
     log(`═══════════════════════════════════════════════════════════`, 'info');
-    log(`Skill1: 获取录音 - 输入: trackWorkId=${trackWorkId}`, 'info');
-    
-    // Step 1: 查询工单
-    log(`Skill1: Step1 查询工单...`, 'info');
+    log(`Skill1: 获取录音文本 - 输入: trackWorkId=${trackWorkId}`, 'info');
+
+    // Step 1: 查询工单号
+    log(`Skill1: Step1 查询工单号...`, 'info');
     const trackResult = await fetch({
         url: CONFIG.endpoints.trackList,
         method: 'POST'
     }, { trackWorkId });
-    
-    // 处理 XML 响应：AMISResponseDTO.status 和 AMISResponseDTO.msg
+
+    // 处理 XML 响应
     const status = trackResult.data?.AMISResponseDTO?.status || trackResult.data?.status;
     const msg = trackResult.data?.AMISResponseDTO?.msg || trackResult.data?.msg;
-    // XML 解析后结构：AMISResponseDTO.data.data.items.items (因为 XML 是<data><items><items>...</items></items></data>)
     const amisData = trackResult.data?.AMISResponseDTO;
     const innerData = amisData?.data?.data || amisData?.data;
     const itemsArray = innerData?.items;
-    // items 可能是数组或对象
+
     let items = [];
     if (Array.isArray(itemsArray)) {
         items = itemsArray;
@@ -403,16 +405,16 @@ async function skill1_getCallRecord(trackWorkId) {
     } else if (itemsArray) {
         items = [itemsArray];
     }
-    
+
     log(`Skill1: 解析结果 - status=${status}, items 数量=${items?.length || 0}`, 'info');
-    
+
     if (trackResult.status !== 200 || status != 0) {
         return {
             success: false,
             fail_reason: `查询工单失败：${msg || 'HTTP ' + trackResult.status}`
         };
     }
-    
+
     if (!items || !items.length) {
         return {
             success: false,
@@ -420,64 +422,129 @@ async function skill1_getCallRecord(trackWorkId) {
             debug: { data: trackResult.data, items }
         };
     }
-    
+
     const servWorkId = items[0].workId;
     log(`Skill1: 找到工单号 ${servWorkId}`, 'success');
-    
+
     await delay(500);
-    // 使用带重试的 fetch（处理间歇性 401 错误）
+
+    // Step 2: 查询通话记录获取 detectRecordId
+    log(`Skill1: Step2 查询通话记录获取 detectRecordId...`, 'info');
     const callResult = await fetchWithRetry({
         url: `${CONFIG.endpoints.callRecord}?servWorkId=${servWorkId}`
     });
-    
-    // 处理 XML 响应
-    log(`Skill1: 录音接口原始响应 = ${JSON.stringify(callResult.data).substring(0, 500)}`, 'info');
+
+    log(`Skill1: 通话记录原始响应 = ${JSON.stringify(callResult.data).substring(0, 500)}`, 'info');
     const callStatus = callResult.data?.AMISResponseDTO?.status || callResult.data?.status;
-    const callMsg = callResult.data?.AMISResponseDTO?.msg || callResult.data?.msg || callResult.data?.message;
     const callRecords = callResult.data?.AMISResponseDTO?.data || callResult.data?.data || [];
     const records = Array.isArray(callRecords) ? callRecords : (callRecords?.items || []);
-    
+
     if (callResult.status !== 200 || callStatus != 0) {
         return {
             success: false,
-            fail_reason: `查询录音失败：${callMsg || 'HTTP ' + callResult.status}`,
+            fail_reason: `查询通话记录失败：${callStatus || 'HTTP ' + callResult.status}`,
             servWorkId
         };
     }
-    
-    const validRecords = records.filter(r => 
-        (r.callTypeName === '工程师' && r.peerTypeName === '用户') ||
-        (r.callTypeName === '用户' && r.peerTypeName === '工程师')
-    );
-    
-    if (!validRecords.length) {
+
+    if (!records || records.length === 0) {
         return {
             success: false,
-            fail_reason: '该工单暂无工程师与用户的通话记录',
+            fail_reason: '该工单暂无通话记录',
             servWorkId
         };
     }
-    
-    validRecords.sort((a, b) => new Date(b.startTime) - new Date(a.startTime));
-    const latestRecord = validRecords[0];
-    
-    log(`Skill1: 找到录音`, 'success');
-    
+
+    // 筛选规则：优先选有 detectRecordId 的记录
+    const recordsWithDetectId = records.filter(r => r.detectRecordId);
+    const selectedRecord = recordsWithDetectId.length > 0 ? recordsWithDetectId[0] : records[0];
+
+    if (!selectedRecord.detectRecordId) {
+        return {
+            success: false,
+            fail_reason: '该通话记录无 detectRecordId',
+            servWorkId
+        };
+    }
+
+    const detectRecordId = selectedRecord.detectRecordId;
+    log(`Skill1: 获取到 detectRecordId=${detectRecordId}`, 'success');
+
+    // Step 3: 获取语音转文字
+    log(`Skill1: Step3 获取语音转文字...`, 'info');
+    let voiceText = '';
+    try {
+        const voiceResult = await fetchWithRetry({
+            url: `https://test3-admin.xiujiadian.com/bfm-mds/detectRecord/voiceRecord/content?detectRecordId=${detectRecordId}&pageIndex=1&pageSize=100`
+        });
+
+        const voiceData = voiceResult.data;
+        if (voiceData?.status === 0 && voiceData?.data?.items) {
+            // 拼接对话文本
+            voiceText = voiceData.data.items.map(item => {
+                const role = item.role === 1 ? '工程师' : '用户';
+                return `${role}: ${item.text}`;
+            }).join('\n');
+            log(`Skill1: 获取语音转文字成功，共 ${voiceData.data.items.length} 条`, 'success');
+        } else {
+            log(`Skill1: 语音转文字接口返回异常`, 'warning');
+            // 降级使用 remark 字段
+            voiceText = selectedRecord.remark || '';
+        }
+    } catch (e) {
+        log(`Skill1: 获取语音转文字异常: ${e.message}`, 'warning');
+        voiceText = selectedRecord.remark || '';
+    }
+
+    log(`Skill1: 完成`, 'success');
+
     return {
         success: true,
+        trackWorkId,
         servWorkId,
-        audio_url: latestRecord.tapeUrl,
-        record_info: {
-            startTime: latestRecord.startTime,
-            duration: latestRecord.duration
-        }
+        detectRecordId,
+        voiceText
     };
 }
 
-async function skill2_analyzeIntent(trackWorkId, servWorkId, audioUrl) {
+async function skill2_analyzeIntent(trackWorkId, servWorkId, recordingData) {
     log(`═══════════════════════════════════════════════════════════`, 'info');
-    log(`Skill2: 识别意图 - 输入: trackWorkId=${trackWorkId}, servWorkId=${servWorkId}, audioUrl=${audioUrl?.substring(0, 50)}...`, 'info');
-    
+    log(`Skill2: 识别意图 - 输入: trackWorkId=${trackWorkId}, servWorkId=${servWorkId}`, 'info');
+
+    // recordingData 可能是：
+    // 1. 字符串格式的纯文本（如 "工程师: xxx\n用户: yyy"）
+    // 2. 或者包含 items 的结构化数据
+    // 需要按 SKILL.md 格式构造 recording JSON 字符串
+
+    let recordingJsonStr;
+    if (typeof recordingData === 'string') {
+        // 纯文本格式：转换为 items 数组
+        // 格式: "工程师: xxx\n用户: yyy\n..."
+        const lines = recordingData.split('\n').filter(line => line.trim());
+        const items = lines.map((line, idx) => {
+            const [role, ...textParts] = line.split(':');
+            return {
+                role: role.includes('工程师') ? '工程师' : '用户',
+                text: textParts.join(':').trim()
+            };
+        });
+
+        const recordingObj = {
+            success: true,
+            detect_record_id: '',
+            total: items.length,
+            fetched_count: items.length,
+            page_count: 1,
+            items: items
+        };
+        recordingJsonStr = JSON.stringify(recordingObj);
+    } else {
+        // 已经是对象或字符串化的 JSON
+        recordingJsonStr = typeof recordingData === 'string' ? recordingData : JSON.stringify(recordingData);
+    }
+
+    log(`Skill2: recording 数据长度 = ${recordingJsonStr.length}`, 'info');
+
     const result = await fetch({
         url: CONFIG.endpoints.intentAnalyze,
         method: 'POST',
@@ -486,7 +553,7 @@ async function skill2_analyzeIntent(trackWorkId, servWorkId, audioUrl) {
         }
     }, {
         inputs: {
-            recording: audioUrl,
+            recording: recordingJsonStr,
             dataMap: trackWorkId
         }
     });
@@ -627,45 +694,183 @@ async function skill3_handleTrack(trackWorkId, servWorkId, intentName, intentRes
 async function skill4_modifyTime(trackWorkId, servWorkId) {
     log(`═══════════════════════════════════════════════════════════`, 'info');
     log(`Skill4: 改约 - 输入: trackWorkId=${trackWorkId}, servWorkId=${servWorkId}`, 'info');
-    
-    // 计算新预约时间（当天+2天 09:00）
-    const now = new Date();
-    now.setDate(now.getDate() + 2);
-    now.setHours(9, 0, 0, 0);
-    
-    const newTime = now.toISOString().replace('T', ' ').substring(0, 19);
-    log(`Skill4: 计算新预约时间 = ${newTime}`, 'info');
-    
-    // 调用修改预约时间 API
-    log(`Skill4: 调用修改预约时间 API...`, 'info');
-    const modifyResult = await fetch({
-        url: CONFIG.endpoints.modifyTime,
-        method: 'POST'
-    }, {
-        servWorkId: servWorkId,
-        appointmentTime: newTime,
-        modifySource: 11
-    });
-    
-    log(`Skill4: API 返回 = ${JSON.stringify(modifyResult.data).substring(0, 500)}`, 'info');
-    
-    const modStatus = modifyResult.data?.AMISResponseDTO?.status || modifyResult.data?.status;
-    const modMsg = modifyResult.data?.AMISResponseDTO?.msg || modifyResult.data?.msg || modifyResult.data?.message;
-    
-    if (modifyResult.status !== 200 || modStatus != 0) {
-        log(`Skill4: 修改预约时间失败 - status=${modStatus}, msg=${modMsg}`, 'error');
+
+    try {
+        // Step 1: 登录获取 sessionId
+        log(`Skill4: Step1 登录获取 sessionId...`, 'info');
+
+        const loginRes = await fetch({
+            url: 'https://test3-mcc.xiujiadian.com/cas/login.action',
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                staffName: CONFIG.username,
+                password: CONFIG.password
+            }),
+            redirect: 'manual'
+        });
+
+        if (loginRes.status !== 200 && loginRes.status !== 302) {
+            log(`Skill4: 登录失败，status=${loginRes.status}`, 'error');
+            return { success: false, fail_reason: '登录失败' };
+        }
+
+        // 提取 cookies
+        const cookies = [];
+        const setCookieHeaders = loginRes.headers.getSetCookie ? loginRes.headers.getSetCookie() : [];
+        if (setCookieHeaders.length > 0) {
+            setCookieHeaders.forEach(c => cookies.push(c.split(';')[0]));
+        } else {
+            loginRes.headers.forEach((value, key) => {
+                if (key.toLowerCase() === 'set-cookie') {
+                    cookies.push(value.split(';')[0]);
+                }
+            });
+        }
+
+        // 从 cookie 中提取 sessionId（test3.zmn.id=xxx）
+        let sessionId = '';
+        cookies.forEach(c => {
+            if (c.startsWith('test3.zmn.id=')) {
+                sessionId = c.split('=')[1];
+            }
+        });
+
+        if (!sessionId) {
+            log(`Skill4: 登录成功但未获取到sessionId`, 'error');
+            return { success: false, fail_reason: '登录成功但未获取到sessionId' };
+        }
+
+        log(`Skill4: 获取 sessionId 成功`, 'success');
+
+        // Step 2: 使用 sessionId + AK 调用获取人员信息接口
+        log(`Skill4: Step2 获取人员信息...`, 'info');
+
+        const staffRes = await fetch({
+            url: 'https://test-ais.xiujiadian.com/ratel-api/base-mcc/mcStaffForeignListRemoteService/getLoginStaffBySessionId',
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer ' + CONFIG.intentToken
+            },
+            body: JSON.stringify({ sessionId })
+        });
+
+        const staffText = await staffRes.text();
+        let staffInfo = { realName: '', deptName: '', deptId: 0, staffId: 0 };
+
+        try {
+            const staffData = JSON.parse(staffText);
+            if (staffData.success === true && staffData.data) {
+                staffInfo = staffData.data;
+                log(`Skill4: 获取人员信息成功: ${staffInfo.realName}`, 'success');
+            } else {
+                log(`Skill4: 获取人员信息失败: ${JSON.stringify(staffData)}`, 'error');
+                return { success: false, fail_reason: '获取人员信息失败' };
+            }
+        } catch (e) {
+            // 尝试从 XML 提取
+            const realName = staffText.match(/<realName>([^<]+)<\/realName>/);
+            const deptName = staffText.match(/<deptName>([^<]+)<\/deptName>/);
+            const deptId = staffText.match(/<deptId>([^<]+)<\/deptId>/);
+            const staffIdMatch = staffText.match(/<staffId>([^<]+)<\/staffId>/);
+
+            if (realName && staffIdMatch) {
+                staffInfo = {
+                    realName: realName[1],
+                    deptName: deptName ? deptName[1] : '',
+                    deptId: deptId ? parseInt(deptId[1]) : 0,
+                    staffId: staffIdMatch ? parseInt(staffIdMatch[1]) : 0
+                };
+                log(`Skill4: 获取人员信息成功(XML解析): ${staffInfo.realName}`, 'success');
+            } else {
+                log(`Skill4: 无法解析人员信息响应`, 'error');
+                return { success: false, fail_reason: '无法解析人员信息响应' };
+            }
+        }
+
+        // Step 3: 修改预约时间
+        log(`Skill4: Step3 修改预约时间...`, 'info');
+
+        // 格式化时间函数
+        function formatTime(date) {
+            const y = date.getFullYear();
+            const M = String(date.getMonth() + 1).padStart(2, '0');
+            const d = String(date.getDate()).padStart(2, '0');
+            const h = String(date.getHours()).padStart(2, '0');
+            const m = String(date.getMinutes()).padStart(2, '0');
+            const s = String(date.getSeconds()).padStart(2, '0');
+            return `${y}-${M}-${d} ${h}:${m}:${s}`;
+        }
+
+        const now = new Date();
+        const operateTime = formatTime(now);
+
+        // 当天 +2 天后的 09:00
+        const dutyDate = new Date(now);
+        dutyDate.setDate(dutyDate.getDate() + 2);
+        dutyDate.setHours(9, 0, 0, 0);
+        const dutyTime = formatTime(dutyDate);
+
+        const body = {
+            operateTime,
+            servWorkId,
+            operator: staffInfo.realName,
+            operatorDeptName: staffInfo.deptName,
+            dutyTime,
+            operatorDeptId: staffInfo.deptId,
+            operatorId: String(staffInfo.staffId),
+            operatorIdentity: 2
+        };
+
+        log(`Skill4: 请求体 = ${JSON.stringify(body)}`, 'info');
+
+        const modifyResult = await fetch({
+            url: CONFIG.endpoints.modifyTime,
+            method: 'POST',
+            headers: {
+                'abtag': 'p0342'
+            }
+        }, body);
+
+        log(`Skill4: API 返回 = ${JSON.stringify(modifyResult.data).substring(0, 500)}`, 'info');
+
+        // 解析响应
+        let success = false;
+        let msg = '未知错误';
+
+        try {
+            const data = JSON.parse(modifyResult.data);
+            success = data.success === true;
+            msg = data.msg || '未知错误';
+        } catch (e) {
+            const statusMatch = String(modifyResult.data).match(/<status>(\d+)<\/status>/);
+            const msgMatch = String(modifyResult.data).match(/<msg>([^<]*)<\/msg>/);
+            success = statusMatch && statusMatch[1] === '200';
+            msg = msgMatch ? msgMatch[1] : '未知错误';
+        }
+
+        if (success) {
+            log(`Skill4: ✅ 修改预约时间成功！新时间=${dutyTime}`, 'success');
+            return {
+                success: true,
+                new_appointment_time: dutyTime,
+                operator: staffInfo.realName
+            };
+        } else {
+            log(`Skill4: ❌ 修改预约时间失败: ${msg}`, 'error');
+            return {
+                success: false,
+                fail_reason: msg
+            };
+        }
+    } catch (e) {
+        log(`Skill4: ❌ 执行异常: ${e.message}`, 'error');
         return {
             success: false,
-            fail_reason: `修改预约时间失败：${modMsg || 'HTTP ' + modifyResult.status}`
+            fail_reason: e.message
         };
     }
-    
-    log(`Skill4: ✅ 修改预约时间成功！新时间=${newTime}`, 'success');
-    return {
-        success: true,
-        new_appointment_time: newTime,
-        api_response: modifyResult.data
-    };
 }
 
 async function skill5_cancelWork(trackWorkId, servWorkId, cancelReason) {
@@ -740,55 +945,127 @@ async function skill5_cancelWork(trackWorkId, servWorkId, cancelReason) {
     }
 }
 
-async function skill6_createFollowup(trackWorkId, servWorkId, intentName, intentResult, followupType, interruptReason) {
+async function skill6_createFollowup(trackWorkId, servWorkId, intentName, intentResult, followupType, taskItemId = 1202) {
     log(`═══════════════════════════════════════════════════════════`, 'info');
-    log(`Skill6: 生成跟单任务 - 输入: trackWorkId=${trackWorkId}, servWorkId=${servWorkId}, type=${followupType}`, 'info');
-    
-    // 调用创建跟单任务 API
-    log(`Skill6: 调用创建跟单任务 API...`, 'info');
-    
+    log(`Skill6: 生成跟单任务 - 输入: trackWorkId=${trackWorkId}, servWorkId=${servWorkId}, type=${followupType}, taskItemId=${taskItemId}`, 'info');
+
     try {
-        const followupResult = await fetchWithRetry({
+        // Step 1: 查询跟单详情获取完整数据
+        log(`Skill6: Step1 查询跟单详情...`, 'info');
+        const detailResult = await fetch({
+            url: `https://test3-track.xiujiadian.com/amis/track/detail?trackWorkId=${trackWorkId}&workId=${servWorkId}`,
+            method: 'GET'
+        });
+
+        const detailData = detailResult.data?.AMISResponseDTO || detailResult.data;
+        const detailStatus = detailData?.status || detailResult.data?.status;
+
+        let trackDetail = {
+            trackWorkId: trackWorkId,
+            workId: servWorkId,
+            cityId: '',
+            cityName: '',
+            companyId: '',
+            companyName: '',
+            engineerId: '',
+            engineerName: '',
+            engineerPhone: ''
+        };
+
+        if (detailStatus === 0 || detailResult.status === 200) {
+            // 从 XML 响应中提取详情
+            const xmlStr = typeof detailResult.data === 'string' ? detailResult.data : JSON.stringify(detailResult.data);
+            trackDetail = {
+                trackWorkId: xmlStr.match(/<trackWorkId>([^<]+)<\/trackWorkId>/)?.[1] || trackWorkId,
+                workId: xmlStr.match(/<workId>([^<]+)<\/workId>/)?.[1] || servWorkId,
+                cityId: xmlStr.match(/<cityId>([^<]+)<\/cityId>/)?.[1] || '',
+                cityName: xmlStr.match(/<cityName>([^<]+)<\/cityName>/)?.[1] || '',
+                companyId: xmlStr.match(/<companyId>([^<]+)<\/companyId>/)?.[1] || '',
+                companyName: xmlStr.match(/<companyName>([^<]+)<\/companyName>/)?.[1] || '',
+                engineerId: xmlStr.match(/<engineerId>([^<]+)<\/engineerId>/)?.[1] || '',
+                engineerName: xmlStr.match(/<engineerName>([^<]+)<\/engineerName>/)?.[1] || '',
+                engineerPhone: xmlStr.match(/<engineerPhone>([^<]+)<\/engineerPhone>/)?.[1] || ''
+            };
+            log(`Skill6: 获取跟单详情成功: cityName=${trackDetail.cityName}, engineerName=${trackDetail.engineerName}`, 'info');
+        } else {
+            log(`Skill6: 获取跟单详情失败，使用默认值继续`, 'warning');
+        }
+
+        // Step 2: 构造创建跟单任务请求
+        // 按 SKILL.md 强制规则:
+        // - bizId = trackWorkId (跟单ID)
+        // - bizSource = 40 (固定值)
+        // - bizOrderType = 2 (固定值)
+        // - bizOrderId = servWorkId (工单ID)
+        const createBody = {
+            taskItemId: taskItemId,
+            bizId: parseInt(trackWorkId),           // 跟单ID
+            bizSource: 40,                          // 固定值 40
+            bizOrderType: 2,                        // 固定值 2
+            bizOrderId: parseInt(servWorkId),       // 工单ID
+            cityId: trackDetail.cityId ? parseInt(trackDetail.cityId) : 0,
+            cityName: trackDetail.cityName,
+            subCompanyId: trackDetail.companyId ? parseInt(trackDetail.companyId) : 0,
+            subCompanyName: trackDetail.companyName,
+            engineerId: trackDetail.engineerId ? parseInt(trackDetail.engineerId) : 0,
+            engineerName: trackDetail.engineerName,
+            userTelephone: trackDetail.engineerPhone,
+            plat: 10
+        };
+
+        log(`Skill6: Step2 调用创建跟单任务 API...`, 'info');
+        log(`Skill6: 请求参数: bizId=${createBody.bizId}, bizOrderId=${createBody.bizOrderId}, bizSource=${createBody.bizSource}`, 'info');
+
+        const followupResult = await fetch({
             url: CONFIG.endpoints.createFollowup,
             method: 'POST'
-        }, {
-            bizId: trackWorkId,
-            bizOrderId: servWorkId || trackWorkId,
-            taskItemId: 2003,
-            operatorRemark: `${followupType || '挂起跟单'}: ${interruptReason || intentResult || ''}`
-        }, 2, 500);
-        
+        }, createBody);
+
         log(`Skill6: API 返回 = ${JSON.stringify(followupResult.data).substring(0, 500)}`, 'info');
-        
-        const followStatus = followupResult.data?.AMISResponseDTO?.status || followupResult.data?.status;
-        const followMsg = followupResult.data?.AMISResponseDTO?.msg || followupResult.data?.msg;
-        
-        // 检查是否是"接口不存在"错误，如果是则阻断
-        if (followMsg?.includes('No endpoint') || followMsg?.includes('不存在') || followResult.status === 404) {
+
+        // 解析响应
+        let success = false;
+        let msg = '';
+        let trackTaskId = null;
+
+        if (typeof followupResult.data === 'object') {
+            success = followupResult.data.success === true;
+            msg = followupResult.data.msg || '';
+            trackTaskId = followupResult.data.data;
+        } else {
+            // 尝试从 XML 或文本中提取
+            const responseStr = String(followupResult.data);
+            success = responseStr.includes('"success":true') || responseStr.includes('<success>true</success>');
+            msg = responseStr.match(/<msg>([^<]+)<\/msg>/)?.[1] || responseStr.match(/"msg":"([^"]+)"/)?.[1] || '';
+        }
+
+        // 检查是否是"接口不存在"错误
+        if (msg?.includes('No endpoint') || msg?.includes('不存在') || followupResult.status === 404) {
             log(`Skill6: ❌ 创建跟单接口不存在，阻断执行`, 'error');
             return {
                 success: false,
                 followup_task_type: followupType || '挂起跟单',
                 result: 'api_not_available',
-                reason: `接口不存在：${followMsg}`
+                reason: `接口不存在：${msg}`
             };
         }
-        
-        if (followupResult.status !== 200 || followStatus != 0) {
-            log(`Skill6: ❌ 创建跟单任务失败: status=${followStatus}, msg=${followMsg}`, 'error');
+
+        if (!success) {
+            log(`Skill6: ❌ 创建跟单任务失败: msg=${msg}`, 'error');
             return {
                 success: false,
                 followup_task_type: followupType || '挂起跟单',
                 result: 'failed',
-                fail_reason: `${followMsg || 'HTTP ' + followupResult.status}`
+                fail_reason: msg || '创建失败'
             };
         }
-        
-        log(`Skill6: ✅ 创建跟单任务成功！`, 'success');
+
+        log(`Skill6: ✅ 创建跟单任务成功！trackTaskId=${trackTaskId}`, 'success');
         return {
             success: true,
             followup_task_type: followupType || '挂起跟单',
             result: 'created',
+            trackTaskId: trackTaskId,
             api_response: followupResult.data
         };
     } catch (e) {
@@ -824,8 +1101,8 @@ async function runWorkflow(trackWorkId) {
             // 执行 Skill6
             currentStep++;
             steps.push({ step: currentStep, name: 'Skill6: 生成跟单（兜底）', status: 'running' });
-            const skill6Result = await skill6_createFollowup(trackWorkId, skill1Result.servWorkId, '', '', '挂起跟单', skill1Result.fail_reason);
-            
+            const skill6Result = await skill6_createFollowup(trackWorkId, skill1Result.servWorkId, '', '', '挂起跟单');
+
             if (!skill6Result.success) {
                 steps[steps.length - 1] = { ...steps[steps.length - 1], status: 'failed', result: skill6Result };
                 log(`❌ Skill6 失败：${skill6Result.fail_reason}`, 'error');
@@ -847,7 +1124,7 @@ async function runWorkflow(trackWorkId) {
         // Step 2: Skill2
         currentStep++;
         steps.push({ step: currentStep, name: 'Skill2: 识别意图', status: 'running' });
-        const skill2Result = await skill2_analyzeIntent(trackWorkId, skill1Result.servWorkId, skill1Result.audio_url);
+        const skill2Result = await skill2_analyzeIntent(trackWorkId, skill1Result.servWorkId, skill1Result.voiceText);
         
         if (skill2Result.status === 'interrupted') {
             steps[steps.length - 1] = { ...steps[steps.length - 1], status: 'failed', result: skill2Result };
@@ -945,15 +1222,15 @@ async function runWorkflow(trackWorkId) {
             // Skill6 - 其他意图
             currentStep++;
             steps.push({ step: currentStep, name: 'Skill6: 生成跟单', status: 'running' });
-            const skill6Result = await skill6_createFollowup(trackWorkId, skill1Result.servWorkId, intentName, skill2Result.intent_result, '挂起跟单', '');
-            
+            const skill6Result = await skill6_createFollowup(trackWorkId, skill1Result.servWorkId, intentName, skill2Result.intent_result, '挂起跟单');
+
             if (!skill6Result.success) {
                 steps[steps.length - 1] = { ...steps[steps.length - 1], status: 'failed', result: skill6Result };
                 log(`❌ Skill6 失败：${skill6Result.fail_reason}`, 'error');
             } else {
                 steps[steps.length - 1] = { ...steps[steps.length - 1], status: 'completed', result: skill6Result };
             }
-            
+
             return {
                 success: true,
                 intent: intentName,

@@ -2,7 +2,7 @@
 """
 Recording Intention Analysis Script
 
-Calls the external workflow API to analyze recording files and determine user intention.
+Calls the external workflow API to analyze recording transcription data and determine user intention.
 """
 
 import sys
@@ -13,29 +13,45 @@ import urllib.error
 from typing import Dict, Any, Optional
 
 
-API_ENDPOINT = "https://test-ai.xiujiadian.com/zmn-ai-workflow/v1/bce999b25b9b4a1dac1cd938b035aeac/execute_flow"
+API_ENDPOINT = "https://test-ai.xiujiadian.com/zmn-ai-workflow/v1/961296a26366462b9fbef746ae4ea2cf/execute_flow"
 API_TOKEN = "x76utyhsqdtirjcpp12sp9n2"
 
 
-def analyze_recording(recording_url: str, data_map: str = "XXXX") -> Dict[str, Any]:
+def analyze_recording(recording_data) -> Dict[str, Any]:
     """
-    Analyze a recording file to determine user intention.
+    Analyze recording transcription data to determine user intention.
 
     Args:
-        recording_url: URL or file path to the audio recording
-        data_map: Additional context data (default: "XXXX")
+        recording_data: JSON string or dict containing transcription data with items
+                        (role, text, beginTime, endTime, silenceDuration).
 
     Returns:
         Parsed intention analysis result
     """
+    # Ensure recording_data is a JSON string (not a dict/object)
+    if isinstance(recording_data, dict):
+        recording_json_str = json.dumps(recording_data, ensure_ascii=False)
+    else:
+        # Validate that it's valid JSON, then use it as-is
+        try:
+            json.loads(recording_data)
+            recording_json_str = recording_data
+        except json.JSONDecodeError:
+            return {
+                "error": True,
+                "message": "Invalid JSON in recording data: not a valid JSON string",
+                "code": -1
+            }
+
     headers = {
         "Content-Type": "application/json",
         "ak": f"Bearer {API_TOKEN}"
     }
 
+    # The recording value must be a JSON string (stringified JSON inside JSON)
     payload = {
         "inputs": {
-            "recording": recording_url
+            "recording": recording_json_str
         }
     }
 
@@ -153,13 +169,23 @@ def format_output(result: Dict[str, Any]) -> str:
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Analyze recording intention')
-    parser.add_argument('recording', help='URL or path to the recording file')
+    parser = argparse.ArgumentParser(description='Analyze recording transcription intention')
+    parser.add_argument('recording', nargs='?', help='JSON string of recording transcription data')
+    parser.add_argument('--file', help='Path to a JSON file containing recording transcription data')
     parser.add_argument('--json', action='store_true', help='Output raw JSON')
 
     args = parser.parse_args()
 
-    result = analyze_recording(args.recording, args.data_map)
+    # Read recording data from file or command line argument
+    if args.file:
+        with open(args.file, 'r', encoding='utf-8') as f:
+            recording_data = f.read().strip()
+    elif args.recording:
+        recording_data = args.recording
+    else:
+        parser.error("Either provide recording JSON data as argument or use --file")
+
+    result = analyze_recording(recording_data)
 
     if args.json:
         print(json.dumps(result, ensure_ascii=False, indent=2))
