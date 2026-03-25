@@ -641,7 +641,7 @@ async function skill3_handleTrack(trackWorkId, servWorkId, intentName, intentRes
             handleOptionList: [{ optionId: 111, optionName: '挂起申请驳回', optionLevel: 0 }],
             handleJumpType: 0,
             handleRemark: `${intentName}\n${intentResult}`,
-            isCompleteTrack: 2
+            isCompleteTrack: 1
         });
 
         log(`Skill3: API 返回 = ${JSON.stringify(handleResult.data).substring(0, 500)}`, 'info');

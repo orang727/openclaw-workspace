@@ -470,7 +470,7 @@ async function skill3_handleTrack(workId, trackWorkId, intentName) {
     ],
     handleJumpType: 0,
     handleRemark,
-    isCompleteTrack: 2
+    isCompleteTrack: 1
   };
 
   addLog('REQUEST', '提交跟单处理', { 
