@@ -12,6 +12,7 @@ description: 修改工单预约时间。当运营人员需要修改工单的预�
 Skill 接收以下入参：
 - **跟单ID**（trackWorkId）：必填，需要修改预约时间的跟单ID
 - **其他信息**：可选，用户提供的其他补充信息
+- **环境**（env）：必填，目标环境。传 `生产` 时使用生产环境接口，其他值时默认使用测试环境接口
 
 ## 认证说明
 
@@ -54,6 +55,7 @@ authContent.split('\n').forEach(line => {
 |--------|--------|------|
 | `{skillDir}` | 本 SKILL.md 文件所在目录的绝对路径 | 用于定位 `.auth` 等配置文件 |
 | `{trackWorkId}` | 用户提供的跟单ID | 从用户输入中获取 |
+| `{env}` | 用户指定的环境，`生产` 或其他（默认测试） | 从用户输入中获取 |
 | `{servWorkId}` | Step 2 查出的工单号 | 从接口返回中提取 |
 | `{realName}` | Step 3 获取的操作人姓名 | 从人员信息接口返回中提取 |
 | `{deptName}` | Step 3 获取的部门名称 | 从人员信息接口返回中提取 |
@@ -65,6 +67,7 @@ authContent.split('\n').forEach(line => {
 ### Step 1: 获取跟单ID
 
 从用户消息（入参中的 **跟单ID** 字段）提取 trackWorkId。若未提供，用 `ask_user_question` 询问。
+同时提取 **环境**（env），不传或非 `生产` 时默认使用测试环境。
 
 ### Step 2: 根据跟单ID查询工单号
 
@@ -83,8 +86,14 @@ authContent.split('\n').forEach(line => {
 });
 
 const trackWorkId = '{trackWorkId}';
+const env = '{env}'; // '生产' 或其他（默认测试）
 
-fetch('https://test3-track.xiujiadian.com/amis/track/list', {
+const isProd = env === '生产';
+const trackBaseUrl = isProd
+  ? 'https://ais.xiujiadian.com/zmn-track-admin'
+  : 'https://test3-track.xiujiadian.com';
+
+fetch(trackBaseUrl + '/amis/track/list', {
   method: 'POST',
   headers: {
     'Content-Type': 'application/json',
@@ -129,10 +138,16 @@ authContent.split('\n').forEach(line => {
   if (idx > 0) authConfig[line.substring(0, idx).trim()] = line.substring(idx + 1).trim();
 });
 
+const env = '{env}'; // '生产' 或其他（默认测试）
+const isProd = env === '生产';
+const mccBaseUrl = isProd ? 'https://mcc.xiujiadian.com' : 'https://test3-mcc.xiujiadian.com';
+const aisBaseUrl = isProd ? 'https://ais.xiujiadian.com' : 'https://test-ais.xiujiadian.com';
+const sessionCookieName = isProd ? 'zmn.id' : 'test3.zmn.id';
+
 (async () => {
   try {
     // Step 3.1: 登录获取 Cookie，从中提取 sessionId
-    const loginRes = await fetch('https://test3-mcc.xiujiadian.com/cas/login.action', {
+    const loginRes = await fetch(mccBaseUrl + '/cas/login.action', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ staffName: authConfig.username, password: authConfig.password }),
@@ -158,11 +173,11 @@ authContent.split('\n').forEach(line => {
       });
     }
 
-    // 从 cookie 中提取 sessionId（test3.zmn.id=xxx）
+    // 从 cookie 中提取 sessionId
     let sessionId = '';
     cookies.forEach(c => {
-      if (c.startsWith('test3.zmn.id=')) {
-        sessionId = c.split('=')[1];
+      if (c.startsWith(sessionCookieName + '=')) {
+        sessionId = c.substring(sessionCookieName.length + 1);
       }
     });
 
@@ -172,7 +187,7 @@ authContent.split('\n').forEach(line => {
     }
 
     // Step 3.2: 使用 sessionId + AK 调用获取人员信息接口
-    const apiUrl = 'https://test-ais.xiujiadian.com/ratel-api/base-mcc/mcStaffForeignListRemoteService/getLoginStaffBySessionId';
+    const apiUrl = aisBaseUrl + '/ratel-api/base-mcc/mcStaffForeignListRemoteService/getLoginStaffBySessionId';
 
     const staffRes = await fetch(apiUrl, {
       method: 'POST',
@@ -288,7 +303,10 @@ const bodyDict = {
 
 (async () => {
   try {
-    const apiUrl = 'https://test-ais.xiujiadian.com/ratel-api/serv-work-general-agg/servWorkModifyDutyTimeRemoteService/modifyDutyTime';
+    const env = '{env}'; // '生产' 或其他（默认测试）
+    const isProd = env === '生产';
+    const aisBaseUrl = isProd ? 'https://ais.xiujiadian.com' : 'https://test-ais.xiujiadian.com';
+    const apiUrl = aisBaseUrl + '/ratel-api/serv-work-general-agg/servWorkModifyDutyTimeRemoteService/modifyDutyTime';
 
     const res = await fetch(apiUrl, {
       method: 'POST',

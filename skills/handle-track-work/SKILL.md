@@ -14,6 +14,7 @@ Skill 接收以下入参：
 - **意图名称**：可选，当前意图的名称
 - **意图判断结果**：可选，意图识别的结果
 - **其他信息**：可选，用户提供的其他补充信息
+- **环境**（env）：必填，目标环境。传 `生产` 时使用生产环境接口，其他值时默认使用测试环境接口
 
 ## 认证说明
 
@@ -24,6 +25,10 @@ Skill 接收以下入参：
 路径：与 SKILL.md 同目录下的 `.auth` 文件，包含以下字段（key=value 格式）：
 ```
 AK=<your_ak_token>
+app-key=<your_app_key>
+secret_key=<your_secret_key>
+username=<your_username>
+password=<your_password>
 ```
 
 ### .auth 文件解析方式
@@ -53,6 +58,7 @@ authContent.split('\n').forEach(line => {
 |--------|--------|------|
 | `{skillDir}` | 本 SKILL.md 文件所在目录的绝对路径 | 用于定位 `.auth` 等配置文件 |
 | `{trackWorkId}` | 用户提供的跟单ID | 从用户输入中获取 |
+| `{env}` | 用户指定的环境，`生产` 或其他（默认测试） | 从用户输入中获取 |
 | `{workId}` | Step 2 查出的工单号 | 从接口返回中提取 |
 | `{intentName}` | 意图名称 | 从用户输入中获取 |
 | `{intentResult}` | 意图判断结果 | 从用户输入中获取 |
@@ -66,6 +72,7 @@ authContent.split('\n').forEach(line => {
 - **意图名称**：可选，未提供时使用空字符串
 - **意图判断结果**：可选，未提供时使用空字符串
 - **其他信息**：可选
+- **环境**（env）：可选，不传或非 `生产` 时默认使用测试环境
 
 ### Step 2: 根据跟单ID查询工单号
 
@@ -84,8 +91,14 @@ authContent.split('\n').forEach(line => {
 });
 
 const trackWorkId = '{trackWorkId}';
+const env = '{env}'; // '生产' 或其他（默认测试）
 
-fetch('https://test3-track.xiujiadian.com/amis/track/list', {
+const isProd = env === '生产';
+const trackBaseUrl = isProd
+  ? 'https://ais.xiujiadian.com/zmn-track-admin'
+  : 'https://test3-track.xiujiadian.com';
+
+fetch(trackBaseUrl + '/amis/track/list', {
   method: 'POST',
   headers: {
     'Content-Type': 'application/json',
@@ -130,6 +143,12 @@ const workId = '{workId}';           // 替换为 Step 2 获取到的 workId
 const trackWorkId = '{trackWorkId}'; // 替换为实际跟单ID
 const intentName = '{intentName}';   // 可选，未提供时替换为空字符串
 const intentResult = '{intentResult}'; // 可选，未提供时替换为空字符串
+const env = '{env}'; // '生产' 或其他（默认测试）
+
+const isProd = env === '生产';
+const trackBaseUrl = isProd
+  ? 'https://ais.xiujiadian.com/zmn-track-admin'
+  : 'https://test3-track.xiujiadian.com';
 
 // 构建 handleRemark：仅在有值时拼接
 const parts = [intentName, intentResult].filter(s => s.length > 0);
@@ -151,7 +170,7 @@ const body = {
   isCompleteTrack: 2
 };
 
-fetch('https://test3-track.xiujiadian.com/amis/track/save/newHandle', {
+fetch(trackBaseUrl + '/amis/track/save/newHandle', {
   method: 'POST',
   headers: {
     'Content-Type': 'application/json',

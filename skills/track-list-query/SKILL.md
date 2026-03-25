@@ -15,17 +15,18 @@ metadata:
 
 ## 参数说明
 
-| 参数     | 必选  | 说明                              | API 字段             | 示例                      |
-| ------ | --- | ------------------------------- | ------------------ | ----------------------- |
-| 跟单内容ID | 是   | 跟单内容 ID 列表                      | trackContentIdList | [1101,1151]             |
-| 数据来源   | 否   | 生产或测试，默认为测试                     | —                  | 测试                      |
-| 工单号    | 否   | 工单号                             | code               | 123456789               |
-| 跟单类型   | 否   | 跟单类型值                           | trackTypeList      | [1001,1002]             |
-| 跟单状态   | 否   | 1=待处理 2=处理中 3=已完结               | trackStatusListStr | [1,2]                   |
-| 跟单等级   | 否   | 跟单等级值                           | trackLevelList     | [1,2]                   |
-| 发起时间   | 否   | 时间范围，格式 "YYYY-MM-DD,YYYY-MM-DD" | createTime         | "2026-03-01,2026-03-21" |
-| 每页条数   | 否   | 默认 10                           | perPage            | 10                      |
-| 页码     | 否   | 默认 1                            | page               | 1                       |
+| 参数 | 必选 | 说明 | API 字段 | 示例 |
+|------|------|------|----------|------|
+| 跟单内容ID | 是 | 跟单内容 ID 列表 | trackContentIdList | [1101,1151] |
+| 数据来源 | 是 | 生产或测试，默认为测试 | — | 测试 |
+| 工单号 | 否 | 工单号 | code | 123456789 |
+| 跟单类型 | 否 | 跟单类型值列表 | trackTypeList | [1108,1107] |
+| 跟单状态 | 否 | 逗号分隔字符串，1=待处理 2=处理中 3=已完结 | trackStatusListStr | "1,2,3" |
+| 跟单等级 | 否 | 跟单等级值列表 | trackLevelList | [1,2] |
+| 城市ID | 否 | 城市 ID 列表 | cityIdList | [110100,310100] |
+| 发起时间 | 否 | 时间范围，格式 "YYYY-MM-DD HH:mm:ss,YYYY-MM-DD HH:mm:ss" | createTime | "2026-03-01 00:00:00,2026-03-21 23:59:59" |
+| 每页条数 | 否 | 默认 10 | pageSize | 10 |
+| 页码 | 否 | 默认 1 | pageIndex | 1 |
 
 ## 认证说明
 
@@ -92,7 +93,7 @@ try {
 
 从用户消息中提取以下参数：
 - **跟单内容ID**（必填）：若未提供，用 `ask_user_question` 询问
-- **数据来源**：默认为"测试"，用户说"生产"/"线上"/"正式"时切换为生产环境
+- **数据来源**（必填）：默认为"测试"，用户说"生产"/"线上"/"正式"时切换为生产环境
 - **其他可选参数**：工单号、跟单类型、跟单状态、跟单等级、发起时间、每页条数、页码
 
 ### Step 2: 构建请求参数
@@ -104,8 +105,8 @@ try {
 ```json
 {
   "trackContentIdList": [1101,1151],
-  "page": 1,
-  "perPage": 10
+  "pageIndex": 1,
+  "pageSize": 10
 }
 ```
 
@@ -114,10 +115,11 @@ try {
 | 用户参数 | JSON 字段 | 类型 |
 |---------|-----------|------|
 | 工单号 | code | Long |
-| 跟单类型 | trackTypeList | List |
-| 跟单状态 | trackStatusListStr | String |
-| 跟单等级 | trackLevelList | List |
-| 发起时间 | createTime | String ("YYYY-MM-DD,YYYY-MM-DD") |
+| 跟单类型 | trackTypeList | List\<Integer\> |
+| 跟单状态 | trackStatusListStr | String (逗号分隔，如 "1,2,3") |
+| 跟单等级 | trackLevelList | List\<Integer\> |
+| 城市ID | cityIdList | List\<Integer\> |
+| 发起时间 | createTime | String ("YYYY-MM-DD HH:mm:ss,YYYY-MM-DD HH:mm:ss") |
 
 ### Step 3: 读取 AK
 
@@ -219,7 +221,7 @@ node /tmp/track_list_query.js
 | 发起人 | promoter | 发起人姓名 |
 | 处理说明 | operateRemark | 最近处理说明 |
 
-同时展示：`共 {total} 条记录，当前第 {page} 页，每页 {perPage} 条`
+同时展示：`共 {total} 条记录，当前第 {pageIndex} 页，每页 {pageSize} 条`
 
 **失败时 (输出 ERROR:)**：展示错误信息给用户
 
@@ -238,8 +240,8 @@ node /tmp/track_list_query.js
 **用户输入**：查询跟单内容 ID 为 [1101,1151]，状态为待处理的跟单
 
 **AI 执行流程**：
-1. 确定参数 → trackContentIdList=[1101,1151], status=1, 数据来源=测试
-2. 构建请求体：`{"trackContentIdList":[1101,1151],"status":1,"page":1,"perPage":10}`
+1. 确定参数 → trackContentIdList=[1101,1151], trackStatusListStr="1", 数据来源=测试
+2. 构建请求体：`{"trackContentIdList":[1101,1151],"trackStatusListStr":"1","pageIndex":1,"pageSize":10}`
 3. 从 `.auth` 文件读取 AK，调用 `https://test3-track.xiujiadian.com/amis/track/list`
 4. 解析响应并以表格展示跟单列表
 

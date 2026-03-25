@@ -14,6 +14,7 @@ description: 根据跟单ID和工单ID创建跟单任务。通过 AK Bearer Toke
 | trackWorkId | Long    | 是   | 跟单ID  |
 | workId      | Long    | 是   | 工单ID  |
 | taskItemId  | Integer | 是   | 任务项ID |
+| env         | String  | 否   | 环境，传入 `生产` 时使用生产环境，默认测试环境 |
 
 ---
 
@@ -48,10 +49,17 @@ authContent.split('\n').forEach(line => {
 
 ## Step 2: 查询跟单详情
 
+### 环境域名映射
+
+| 数据来源 | 域名 |
+|---------|------|
+| 测试（默认） | `https://test3-track.xiujiadian.com` |
+| 生产 | `https://track.xiujiadian.com` |
+
 ### API 端点
 
 ```
-GET https://test3-track.xiujiadian.com/amis/track/detail?trackWorkId={trackWorkId}&workId={workId}
+GET {baseUrl}/amis/track/detail?trackWorkId={trackWorkId}&workId={workId}
 ```
 
 ### 响应格式（XML）
@@ -124,8 +132,13 @@ GET https://test3-track.xiujiadian.com/amis/track/detail?trackWorkId={trackWorkI
 
 ### 创建任务 API 端点
 
+| 数据来源 | 域名 |
+|---------|------|
+| 测试（默认） | `https://test-ais.xiujiadian.com` |
+| 生产 | `https://ais.xiujiadian.com` |
+
 ```
-POST https://test-ais.xiujiadian.com/ratel-api/biz-twd/trackTaskModifyRemoteService/addTrackTask
+POST {aisBaseUrl}/ratel-api/biz-twd/trackTaskModifyRemoteService/addTrackTask
 ```
 
 ### ⚠️ 请求体校验清单（调用 API 前必须逐项核对）
@@ -183,6 +196,12 @@ const skillDir = '{skillDir}';
 const trackWorkId = '{trackWorkId}';
 const workId = '{workId}';
 const taskItemId = {taskItemId};
+const env = '{env}'; // '生产' 或其他（默认测试）
+
+// 环境映射
+const isProd = env === '生产';
+const trackBaseUrl = isProd ? 'https://track.xiujiadian.com' : 'https://test3-track.xiujiadian.com';
+const aisBaseUrl = isProd ? 'https://ais.xiujiadian.com' : 'https://test-ais.xiujiadian.com';
 
 // ========== Step 1: 权限获取 ==========
 const authContent = fs.readFileSync(skillDir + '/.auth', 'utf8');
@@ -207,7 +226,7 @@ const getXmlValue = (xml, tag) => {
 (async () => {
   try {
     // ========== Step 2: 查询跟单详情 ==========
-    const detailUrl = `https://test3-track.xiujiadian.com/amis/track/detail?trackWorkId=${trackWorkId}&workId=${workId}`;
+    const detailUrl = `${trackBaseUrl}/amis/track/detail?trackWorkId=${trackWorkId}&workId=${workId}`;
     const detailRes = await fetch(detailUrl, {
       method: 'GET',
       headers: { 'Authorization': 'Bearer ' + authConfig.AK }
@@ -261,7 +280,7 @@ const getXmlValue = (xml, tag) => {
     console.log(JSON.stringify(createBody, null, 2));
     
     // 调用创建接口
-    const createUrl = 'https://test-ais.xiujiadian.com/ratel-api/biz-twd/trackTaskModifyRemoteService/addTrackTask';
+    const createUrl = `${aisBaseUrl}/ratel-api/biz-twd/trackTaskModifyRemoteService/addTrackTask`;
     const createRes = await fetch(createUrl, {
       method: 'POST',
       headers: {
@@ -304,6 +323,9 @@ node /tmp/create_track_task_from_detail.js
 | `{trackWorkId}` | 用户提供的跟单ID | 查询参数 |
 | `{workId}` | 用户提供的工单ID | 查询参数 |
 | `{taskItemId}` | 用户指定的任务项ID | 创建参数（必填，Integer） |
+| `{env}` | 用户指定的环境 | `生产` 或其他（默认测试） |
+| `{baseUrl}` | 域名根据环境 | 测试: `https://test3-track.xiujiadian.com`，生产: `https://track.xiujiadian.com` |
+| `{aisBaseUrl}` | 域名根据环境 | 测试: `https://test-ais.xiujiadian.com`，生产: `https://ais.xiujiadian.com` |
 
 ---
 

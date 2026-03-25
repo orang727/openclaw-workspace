@@ -14,6 +14,7 @@ Skill 接收以下入参：
 - **意图判断结果**：意图识别的结果
 - **跟单ID**（trackWorkId）：需要查询录音的跟单ID
 - **其他信息**：用户提供的其他补充信息
+- **环境**（env）：必填，目标环境。传 `生产` 时使用生产环境接口，其他值时默认使用测试环境接口
 
 ## 认证说明
 
@@ -53,6 +54,7 @@ authContent.split('\n').forEach(line => {
 |--------|--------|------|
 | `{skillDir}` | 本 SKILL.md 文件所在目录的绝对路径 | 用于定位 `.auth` 等配置文件 |
 | `{trackWorkId}` | 用户提供的跟单ID | 从用户输入中获取 |
+| `{env}` | 用户指定的环境，`生产` 或其他（默认测试） | 从用户输入中获取 |
 | `{servWorkId}` | Step 2 查出的工单号 | 从接口返回中提取 |
 
 ## 执行步骤
@@ -60,6 +62,7 @@ authContent.split('\n').forEach(line => {
 ### Step 1: 获取跟单ID
 
 从用户消息（入参中的 **跟单ID** 字段）提取 trackWorkId。若未提供，用 `ask_user_question` 询问。
+同时提取 **环境**（env），不传或非 `生产` 时默认使用测试环境。
 
 ### Step 2: 根据跟单ID查询工单号
 
@@ -78,8 +81,14 @@ authContent.split('\n').forEach(line => {
 });
 
 const trackWorkId = '{trackWorkId}';
+const env = '{env}'; // '生产' 或其他（默认测试）
 
-fetch('https://test3-track.xiujiadian.com/amis/track/list', {
+const isProd = env === '生产';
+const trackBaseUrl = isProd
+  ? 'https://ais.xiujiadian.com/zmn-track-admin'
+  : 'https://test3-track.xiujiadian.com';
+
+fetch(trackBaseUrl + '/amis/track/list', {
   method: 'POST',
   headers: {
     'Content-Type': 'application/json',
@@ -121,8 +130,14 @@ authContent.split('\n').forEach(line => {
 });
 
 const servWorkId = '{servWorkId}';
+const env = '{env}'; // '生产' 或其他（默认测试）
 
-fetch('https://test3-admin.xiujiadian.com/bfm-serv-work/serv/work/listCallRecord?servWorkId=' + servWorkId, {
+const isProd = env === '生产';
+const callRecordUrl = isProd
+  ? 'https://ais.xiujiadian.com/public/bfm-serv-work/serv/work/listCallRecord?servWorkId=' + servWorkId
+  : 'https://test3-admin.xiujiadian.com/bfm-serv-work/serv/work/listCallRecord?servWorkId=' + servWorkId;
+
+fetch(callRecordUrl, {
   method: 'GET',
   headers: {
     'Content-Type': 'application/json',

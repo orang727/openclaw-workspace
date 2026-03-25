@@ -11,13 +11,14 @@ description: 工单取消。当运营人员需要取消工单，或提到"工单
 
 Skill 接收以下入参：
 - **跟单ID**（trackWorkId）：跟单记录ID
+- **环境**（env）：必填，目标环境。传 `生产` 时使用生产环境接口，其他值时默认使用测试环境接口
 
 ## 认证说明
 
 本 Skill 统一使用 AK Bearer Token 认证：
 
-- **track.xiujiadian.com** → AK Bearer Token（跟单列表查询）
-- **test-ais.xiujiadian.com** → AK Bearer Token（工单取消接口）
+- **track.xiujiadian.com** / **ais.xiujiadian.com** → AK Bearer Token（跟单列表查询）
+- **test-ais.xiujiadian.com** / **ais.xiujiadian.com** → AK Bearer Token（工单取消接口）
 
 从 `.auth` 文件读取 `AK` 字段，请求头：`Authorization: Bearer <AK>`
 
@@ -50,7 +51,9 @@ authContent.split('\n').forEach(line => {
 |--------|--------|------|
 | `{skillDir}` | 本 SKILL.md 文件所在目录的绝对路径 | 用于定位 `.auth` 等配置文件 |
 | `{trackWorkId}` | 用户提供的跟单ID | 从用户输入中获取 |
+| `{env}` | 用户指定的环境，`生产` 或其他（默认测试） | 从用户输入中获取 |
 | `{workId}` | Step 2 查出的 servWorkId | 从接口返回中提取 |
+| `{servOrderId}` | Step 2 查出的 servOrderId | 从接口返回中提取 |
 
 ## 执行步骤
 
@@ -58,6 +61,7 @@ authContent.split('\n').forEach(line => {
 
 从用户消息中提取以下参数：
 - **跟单ID**（trackWorkId）：必填，若未提供用 `ask_user_question` 询问
+- **环境**（env）：可选，不传或非 `生产` 时默认使用测试环境
 
 ### Step 2: 根据跟单ID查询工单号
 
@@ -76,8 +80,14 @@ authContent.split('\n').forEach(line => {
 });
 
 const trackWorkId = '{trackWorkId}';
+const env = '{env}'; // '生产' 或其他（默认测试）
 
-fetch('https://test3-track.xiujiadian.com/amis/track/list', {
+const isProd = env === '生产';
+const trackBaseUrl = isProd
+  ? 'https://ais.xiujiadian.com/zmn-track-admin'
+  : 'https://test3-track.xiujiadian.com';
+
+fetch(trackBaseUrl + '/amis/track/list', {
   method: 'POST',
   headers: {
     'Content-Type': 'application/json',
@@ -123,8 +133,14 @@ authContent.split('\n').forEach(line => {
 
 const servWorkId = '{workId}';
 const servOrderId = '{servOrderId}';
+const env = '{env}'; // '生产' 或其他（默认测试）
 
-fetch('https://test-ais.xiujiadian.com/ratel-api/serv-work-general-agg/cancelApplyModifyRemoteService/submitCancelApply', {
+const isProd = env === '生产';
+const aisBaseUrl = isProd
+  ? 'https://ais.xiujiadian.com'
+  : 'https://test-ais.xiujiadian.com';
+
+fetch(aisBaseUrl + '/ratel-api/serv-work-general-agg/cancelApplyModifyRemoteService/submitCancelApply', {
   method: 'POST',
   headers: {
     'Content-Type': 'application/json',
