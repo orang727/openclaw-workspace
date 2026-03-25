@@ -553,19 +553,56 @@ async function skill4_modifyDutyTime(trackWorkId) {
       redirect: 'manual'
     });
 
+    addLog('INFO', `登录响应状态: ${loginRes.status}`);
+
+    // 提取 sessionId - 支持多种浏览器/Node.js 环境
     let sessionId = '';
-    const setCookieHeaders = loginRes.headers.getSetCookie ? loginRes.headers.getSetCookie() : [];
-    if (setCookieHeaders.length > 0) {
-      setCookieHeaders.forEach(c => {
-        if (c.startsWith('test3.zmn.id=')) {
-          sessionId = c.split('=')[1];
-        }
-      });
+    let allCookies = [];
+
+    // 方法1: getSetCookie() (较新的标准方法)
+    if (loginRes.headers.getSetCookie) {
+      allCookies = loginRes.headers.getSetCookie();
     }
 
+    // 方法2: 遍历 headers 获取 set-cookie (兼容性方案)
+    if (allCookies.length === 0) {
+      try {
+        loginRes.headers.forEach((value, key) => {
+          if (key.toLowerCase() === 'set-cookie') {
+            allCookies.push(value);
+          }
+        });
+      } catch (e) {}
+    }
+
+    addLog('INFO', `获取到 ${allCookies.length} 个 cookie`);
+
+    // 解析 cookie 查找 sessionId
+    for (const cookie of allCookies) {
+      addLog('DEBUG', `Cookie: ${cookie.substring(0, 100)}...`);
+      if (cookie.includes('zmn.id=') || cookie.includes('session')) {
+        const match = cookie.match(/(?:zmn\.id|session)[=:](\w+)/);
+        if (match) {
+          sessionId = match[1];
+          break;
+        }
+      }
+    }
+
+    // 备用：尝试直接从 cookie 字符串匹配
+    if (!sessionId && allCookies.length > 0) {
+      const cookieStr = allCookies.join('; ');
+      const sessionMatch = cookieStr.match(/zmn\.id=([^;]+)/);
+      if (sessionMatch) {
+        sessionId = sessionMatch[1];
+      }
+    }
+
+    addLog('INFO', `解析到的 sessionId: ${sessionId ? sessionId.substring(0, 20) + '...' : '为空'}`);
+
     if (!sessionId) {
-      addLog('ERROR', '登录成功但未获取到sessionId');
-      return { success: false, msg: '登录失败' };
+      addLog('ERROR', '登录成功但未获取到sessionId', { cookies: allCookies });
+      return { success: false, msg: '登录成功但未获取到sessionId' };
     }
 
     // 获取人员信息
@@ -828,12 +865,13 @@ async function skill6_createTrackTask(trackWorkId, workId, taskItemId = 1202) {
     // - bizId = trackWorkId (禁止使用 taskItemId)
     // - bizSource = 40 (固定值)
     // - bizOrderId = workId (不是顶层 workId)
+    // 注意: 直接使用字符串，避免 JavaScript 整数精度丢失
     const createBody = {
       taskItemId: taskItemId,
-      bizId: parseInt(trackDetail.trackWorkId),  // 必须是 trackWorkId!
+      bizId: trackDetail.trackWorkId,            // 保持字符串原值
       bizSource: 40,                              // 固定值 40
       bizOrderType: 2,                            // 固定值 2
-      bizOrderId: parseInt(trackDetail.workId),  // 工单ID映射为 bizOrderId
+      bizOrderId: trackDetail.workId,            // 保持字符串原值
       cityId: parseInt(trackDetail.cityId),
       cityName: trackDetail.cityName,
       subCompanyId: parseInt(trackDetail.companyId),

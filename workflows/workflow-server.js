@@ -710,31 +710,57 @@ async function skill4_modifyTime(trackWorkId, servWorkId) {
             redirect: 'manual'
         });
 
+        log(`Skill4: 登录响应状态: ${loginRes.status}`);
+
         if (loginRes.status !== 200 && loginRes.status !== 302) {
             log(`Skill4: 登录失败，status=${loginRes.status}`, 'error');
             return { success: false, fail_reason: '登录失败' };
         }
 
-        // 提取 cookies
-        const cookies = [];
-        const setCookieHeaders = loginRes.headers.getSetCookie ? loginRes.headers.getSetCookie() : [];
-        if (setCookieHeaders.length > 0) {
-            setCookieHeaders.forEach(c => cookies.push(c.split(';')[0]));
-        } else {
-            loginRes.headers.forEach((value, key) => {
-                if (key.toLowerCase() === 'set-cookie') {
-                    cookies.push(value.split(';')[0]);
-                }
-            });
+        // 提取 cookies - 支持多种浏览器/Node.js 环境
+        let allCookies = [];
+
+        // 方法1: getSetCookie() (较新的标准方法)
+        if (loginRes.headers.getSetCookie) {
+            allCookies = loginRes.headers.getSetCookie();
         }
 
-        // 从 cookie 中提取 sessionId（test3.zmn.id=xxx）
+        // 方法2: 遍历 headers 获取 set-cookie (兼容性方案)
+        if (allCookies.length === 0) {
+            try {
+                loginRes.headers.forEach((value, key) => {
+                    if (key.toLowerCase() === 'set-cookie') {
+                        allCookies.push(value);
+                    }
+                });
+            } catch (e) {}
+        }
+
+        log(`Skill4: 获取到 ${allCookies.length} 个 cookie`);
+
+        // 解析 cookie 查找 sessionId
         let sessionId = '';
-        cookies.forEach(c => {
-            if (c.startsWith('test3.zmn.id=')) {
-                sessionId = c.split('=')[1];
+        for (const cookie of allCookies) {
+            log(`Skill4: Cookie: ${cookie.substring(0, 100)}...`, 'debug');
+            if (cookie.includes('zmn.id=') || cookie.includes('session')) {
+                const match = cookie.match(/(?:zmn\.id|session)[=:](\w+)/);
+                if (match) {
+                    sessionId = match[1];
+                    break;
+                }
             }
-        });
+        }
+
+        // 备用：尝试直接从 cookie 字符串匹配
+        if (!sessionId && allCookies.length > 0) {
+            const cookieStr = allCookies.join('; ');
+            const sessionMatch = cookieStr.match(/zmn\.id=([^;]+)/);
+            if (sessionMatch) {
+                sessionId = sessionMatch[1];
+            }
+        }
+
+        log(`Skill4: 解析到的 sessionId: ${sessionId ? sessionId.substring(0, 20) + '...' : '为空'}`);
 
         if (!sessionId) {
             log(`Skill4: 登录成功但未获取到sessionId`, 'error');
