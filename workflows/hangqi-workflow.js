@@ -412,47 +412,47 @@ async function skill2_recognizeIntent(audioText, detectRecordId = null, recordin
   }
 }
 
-// Skill 3: 跟单处理
-async function skill3_handleTrack(workId, trackWorkId, intentName) {
-  addLog('PROCESS', 'Skill3: 跟单处理', { workId, trackWorkId, intentName });
+// // Skill 3: 跟单处理
+// async function skill3_handleTrack(workId, trackWorkId, intentName) {
+//   addLog('PROCESS', 'Skill3: 跟单处理', { workId, trackWorkId, intentName });
   
-  const authConfig = await loadAuthConfig('handle-track-work');
-  if (!authConfig) throw new Error('认证配置加载失败');
+//   const authConfig = await loadAuthConfig('handle-track-work');
+//   if (!authConfig) throw new Error('认证配置加载失败');
 
-  const body = {
-    workId,
-    trackWorkId,
-    trackContentId: 1191,
-    handleOptionList: [{
-      optionId: 111,
-      optionName: '挂起申请驳回',
-      optionLevel: 0
-    }],
-    handleJumpType: 0,
-    handleRemark: intentName || 'AI自动处理',
-    isCompleteTrack: 1
-  };
+//   const body = {
+//     workId,
+//     trackWorkId,
+//     trackContentId: 1191,
+//     handleOptionList: [{
+//       optionId: 111,
+//       optionName: '挂起申请驳回',
+//       optionLevel: 0
+//     }],
+//     handleJumpType: 0,
+//     handleRemark: intentName || 'AI自动处理',
+//     isCompleteTrack: 1
+//   };
 
-  addLog('REQUEST', '提交跟单处理', { url: `${currentConfig.trackBaseUrl}/amis/track/save/newHandle` });
+//   addLog('REQUEST', '提交跟单处理', { url: `${currentConfig.trackBaseUrl}/amis/track/save/newHandle` });
 
-  const response = await httpPost(`${currentConfig.trackBaseUrl}/amis/track/save/newHandle`,
-    { 'Authorization': `Bearer ${authConfig.AK}` },
-    body
-  );
+//   const response = await httpPost(`${currentConfig.trackBaseUrl}/amis/track/save/newHandle`,
+//     { 'Authorization': `Bearer ${authConfig.AK}` },
+//     body
+//   );
 
-  const xmlText = await response.text();
-  addLog('RESPONSE', '跟单处理响应', { xml: xmlText.substring(0, 200) });
+//   const xmlText = await response.text();
+//   addLog('RESPONSE', '跟单处理响应', { xml: xmlText.substring(0, 200) });
 
-  const status = parseXmlValue(xmlText, 'status');
-  const msg = parseXmlValue(xmlText, 'msg');
+//   const status = parseXmlValue(xmlText, 'status');
+//   const msg = parseXmlValue(xmlText, 'msg');
   
-  if (status !== '0') {
-    throw new Error(`跟单处理失败: ${msg}`);
-  }
+//   if (status !== '0') {
+//     throw new Error(`跟单处理失败: ${msg}`);
+//   }
   
-  addLog('SUCCESS', `Skill3完成: ${msg}`);
-  return { success: true, msg };
-}
+//   addLog('SUCCESS', `Skill3完成: ${msg}`);
+//   return { success: true, msg };
+// }
 
 // Skill 4: 改约
 async function skill4_modifyDutyTime(trackWorkId) {
