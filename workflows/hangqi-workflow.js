@@ -1,19 +1,67 @@
 /**
- * 挂起任务工作流 - 纯 Node.js 实现
- * 不依赖 Lobster，直接调用 Skills
+ * 挂起任务工作流 - 优化版
+ * 纯 Node.js 实现，不依赖 Lobster，直接调用 Skills
  * 
- * 用法: node hangqi-workflow.js <trackWorkId>
+ * 用法: node hangqi-workflow.js <trackWorkId> [taskItemId] [env]
+ * 示例: node hangqi-workflow.js 127363772020785024 1202 prod
  */
 
 const http = require('http');
+const fs = require('fs');
 
 // ==================== 配置 ====================
-const GATEWAY_URL = 'http://localhost:18789';
-const TOKEN = '64a4ffec94093067b0fb0927527cffdb3e4e51cd15a46083';
-const SKILLS_DIR = 'C:/Users/admin/.openclaw/workspace/skills';
+const CONFIG = {
+  GATEWAY_URL: 'http://localhost:18789',
+  TOKEN: '64a4ffec94093067b0fb0927527cffdb3e4e51cd15a46083',
+  SKILLS_DIR: 'C:/Users/admin/.openclaw/workspace/skills',
+  AI_WORKFLOW_AK: 'x76utyhsqdtirjcpp12sp9n2', // 算法组固定 AK
+  INTENT_API_URL: 'https://test-ai.xiujiadian.com/zmn-ai-workflow/v1/961296a26366462b9fbef746ae4ea2cf/execute_flow'
+};
 
-// ==================== 执行日志系统 ====================
+// API 环境配置
+const API_CONFIG = {
+  test: {
+    trackBaseUrl: 'https://test3-track.xiujiadian.com',
+    aisBaseUrl: 'https://test-ais.xiujiadian.com',
+    aisPublicBaseUrl: 'https://test-ais.xiujiadian.com/public',
+    mcc: 'https://test3-mcc.xiujiadian.com',
+    ak: 'aikm_5b5f60ccf5c9457f83461d58'
+  },
+  prod: {
+    trackBaseUrl: 'https://ais.xiujiadian.com/zmn-track-admin',
+    aisBaseUrl: 'https://ais.xiujiadian.com',
+    aisPublicBaseUrl: 'https://ais.xiujiadian.com/public',
+    ratelApiUrl: 'https://ais.xiujiadian.com/ratel-api',
+    mcc: 'https://mcc.xiujiadian.com',
+    ak: 'aikm_0e3de5bf7f5f4d09ab20ad97'
+  }
+};
+
+// ==================== 全局状态 ====================
+let globalEnv = 'test';
+let currentConfig = API_CONFIG.test;
 const executionLogs = [];
+
+// ==================== 日志系统 ====================
+const LOG_ICONS = {
+  REQUEST: '📤',
+  RESPONSE: '📥',
+  PROCESS: '🔄',
+  SUCCESS: '✅',
+  ERROR: '❌',
+  INFO: 'ℹ️',
+  WARN: '⚠️',
+  SKIP: '⏭️',
+  DEBUG: '🐛'
+};
+
+const STEP_ICONS = {
+  completed: '✅',
+  running: '🔄',
+  failed: '❌',
+  skipped: '⏭️',
+  pending: '⏳'
+};
 
 function addLog(category, message, details = null) {
   const logEntry = {
@@ -23,9 +71,14 @@ function addLog(category, message, details = null) {
     details
   };
   executionLogs.push(logEntry);
-  console.log(`[${category}] ${message}`);
+  
+  const icon = LOG_ICONS[category] || '📝';
+  console.log(`${icon} [${category}] ${message}`);
+  
   if (details) {
-    console.log(`  详情: ${JSON.stringify(details, null, 2)}`);
+    const detailsStr = JSON.stringify(details, null, 2);
+    const truncated = detailsStr.length > 500 ? detailsStr.substring(0, 500) + '...' : detailsStr;
+    console.log(`   ${truncated.split('\n').join('\n   ')}`);
   }
 }
 
@@ -43,33 +96,13 @@ function printSummary(success, failAt, failReason, steps) {
   
   console.log('\n📝 详细日志:');
   executionLogs.forEach((log, idx) => {
-    const icon = {
-      'REQUEST': '📤',
-      'RESPONSE': '📥',
-      'PROCESS': '🔄',
-      'SUCCESS': '✅',
-      'ERROR': '❌',
-      'INFO': 'ℹ️',
-      'SKIP': '⏭️'
-    }[log.category] || '📝';
+    const icon = LOG_ICONS[log.category] || '📝';
     console.log(`  ${idx + 1}. ${icon} [${log.category}] ${log.message}`);
-    if (log.details) {
-      const detailsStr = JSON.stringify(log.details);
-      if (detailsStr.length > 300) {
-        console.log(`      ${detailsStr.substring(0, 300)}...`);
-      } else {
-        console.log(`      ${detailsStr}`);
-      }
-    }
   });
   
   console.log('\n📊 执行步骤:');
   steps.forEach(step => {
-    const icon = {
-      'completed': '✅',
-      'running': '🔄',
-      'failed': '❌'
-    }[step.status] || '⏳';
+    const icon = STEP_ICONS[step.status] || '⏳';
     console.log(`  ${icon} Step ${step.step}: ${step.name} [${step.status}]`);
   });
   
@@ -77,41 +110,24 @@ function printSummary(success, failAt, failReason, steps) {
 }
 
 // ==================== 认证配置加载 ====================
-// 使用各 Skill 目录下的 .auth 文件
-// 全局环境配置
-let globalEnv = 'test';
-const API_CONFIG = {
-    test: {
-        trackBaseUrl: 'https://test3-track.xiujiadian.com',
-        aisBaseUrl: 'https://test-ais.xiujiadian.com',
-        aisPublicBaseUrl: 'https://test-ais.xiujiadian.com/public',
-        mcc: 'https://test3-mcc.xiujiadian.com',
-        ak: 'aikm_5b5f60ccf5c9457f83461d58'
-    },
-    prod: {
-        trackBaseUrl: 'https://ais.xiujiadian.com/zmn-track-admin',
-        aisBaseUrl: 'https://ais.xiujiadian.com',
-        aisPublicBaseUrl: 'https://ais.xiujiadian.com/public',
-        ratelApiUrl: 'https://ais.xiujiadian.com/ratel-api',
-        mcc: 'https://mcc.xiujiadian.com',
-        ak: 'aikm_0e3de5bf7f5f4d09ab20ad97'
-    }
-};
-
 async function loadAuthConfig(skillName) {
-  const skillAuthPath = `C:/Users/admin/.openclaw/workspace/skills/${skillName}/.auth`;
+  const skillAuthPath = `${CONFIG.SKILLS_DIR}/${skillName}/.auth`;
   try {
-    const fs = require('fs');
     const authContent = fs.readFileSync(skillAuthPath, 'utf8');
     const authConfig = {};
+    
     authContent.split('\n').forEach(line => {
       const idx = line.indexOf('=');
-      if (idx > 0) authConfig[line.substring(0, idx).trim()] = line.substring(idx + 1).trim();
+      if (idx > 0) {
+        authConfig[line.substring(0, idx).trim()] = line.substring(idx + 1).trim();
+      }
     });
     
     // 根据环境选择 AK
     const isProd = globalEnv === 'prod';
-    authConfig.AK = isProd ? (authConfig.AK_PROD || API_CONFIG.prod.ak) : (authConfig.AK_TEST || API_CONFIG.test.ak);
+    authConfig.AK = isProd 
+      ? (authConfig.AK_PROD || API_CONFIG.prod.ak) 
+      : (authConfig.AK_TEST || API_CONFIG.test.ak);
     
     // 生产环境登录凭证
     if (isProd) {
@@ -121,140 +137,85 @@ async function loadAuthConfig(skillName) {
     
     return authConfig;
   } catch (e) {
-    console.error(`加载认证失败: ${skillAuthPath}`, e.message);
+    addLog('ERROR', `加载认证失败: ${skillAuthPath}`, e.message);
     return null;
   }
 }
 
-// ==================== 工具函数 ====================
-function invokeTool(tool, action, args) {
-  return new Promise((resolve, reject) => {
-    const options = {
-      hostname: 'localhost',
-      port: 18789,
-      path: '/tools/invoke',
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + TOKEN
-      }
-    };
-
-    const req = http.request(options, (res) => {
-      let data = '';
-      res.on('data', chunk => data += chunk);
-      res.on('end', () => {
-        try {
-          const json = JSON.parse(data);
-          resolve(json);
-        } catch (e) {
-          reject(new Error('Invalid JSON: ' + data));
-        }
-      });
-    });
-
-    req.on('error', reject);
-    req.write(JSON.stringify({ tool, action, args }));
-    req.end();
+// ==================== HTTP 工具函数 ====================
+async function httpPost(url, headers, body) {
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...headers },
+    body: JSON.stringify(body)
   });
+  return response;
 }
 
-function log(message, type = 'info') {
-  const prefix = {
-    info: 'ℹ️',
-    success: '✅',
-    error: '❌',
-    warn: '⚠️',
-    step: '🔄'
-  }[type] || '📝';
-  console.log(`${prefix} ${message}`);
+async function httpGet(url, headers) {
+  const response = await fetch(url, {
+    method: 'GET',
+    headers
+  });
+  return response;
+}
+
+// XML 解析辅助函数
+function parseXmlValue(xml, tag) {
+  const match = xml.match(new RegExp(`<${tag}>([^<]*)</${tag}>`));
+  return match ? match[1] : '';
 }
 
 // ==================== Skills 实现 ====================
 
-// Skill 1: 获取录音 (按 SKILL.md call-record-query_v3 定义重写)
+// Skill 1: 获取录音文本
 async function skill1_getRecordText(trackWorkId, taskItemId = 1202) {
-  addLog('PROCESS', `开始执行 Skill1: 获取录音文本`, { trackWorkId, taskItemId });
+  addLog('PROCESS', 'Skill1: 获取录音文本', { trackWorkId, taskItemId });
 
   const authConfig = await loadAuthConfig('call-record-query');
-  if (!authConfig) {
-    addLog('ERROR', '认证配置加载失败');
-    throw new Error('认证配置加载失败');
-  }
+  if (!authConfig) throw new Error('认证配置加载失败');
 
-  // 使用全局配置的环境
-  const AK = env === 'prod' ? (authConfig.AK_PROD || currentConfig.ak) : (authConfig.AK_TEST || currentConfig.ak);
-  const baseUrl = currentConfig.trackBaseUrl;
-  const aisPublicBaseUrl = currentConfig.aisPublicBaseUrl;
-  const aisBaseUrl = currentConfig.aisBaseUrl;
+  const AK = authConfig.AK;
+  const { trackBaseUrl, aisPublicBaseUrl } = currentConfig;
 
   try {
     // Step 1: 查询工单号
-    const listRequestBody = { trackWorkId };
-    addLog('REQUEST', '查询工单号', {
-      url: `${baseUrl}/amis/track/list`,
-      body: listRequestBody
-    });
-
-    const listRes = await fetch(`${baseUrl}/amis/track/list`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + authConfig.AK
-      },
-      body: JSON.stringify(listRequestBody)
-    });
-
+    addLog('REQUEST', '查询工单号', { url: `${trackBaseUrl}/amis/track/list` });
+    
+    const listRes = await httpPost(`${trackBaseUrl}/amis/track/list`, 
+      { 'Authorization': `Bearer ${AK}` }, 
+      { trackWorkId }
+    );
+    
     const listText = await listRes.text();
-    addLog('RESPONSE', '工单号查询响应', { xml: listText.substring(0, 500) });
+    addLog('RESPONSE', '工单号查询响应', { xml: listText.substring(0, 300) });
 
     const workIdMatch = listText.match(/<workId>(\d+)<\/workId>/);
-    let workId;
     if (!workIdMatch) {
-      addLog('ERROR', '未找到工单号', { response: listText.substring(0, 200) });
+      addLog('ERROR', '未找到工单号');
       return { need_human_review: true, workId: null, taskItemId };
     }
-    workId = workIdMatch[1];
-
+    
+    const workId = workIdMatch[1];
     addLog('INFO', `找到工单号: ${workId}`);
 
     // Step 2: 查询通话记录
-    addLog('REQUEST', '查询通话记录', {
-      url: `${aisPublicBaseUrl}/bfm-serv-work/serv/work/listCallRecord?servWorkId=${workId}`
-    });
+    const recordUrl = `${aisPublicBaseUrl}/bfm-serv-work/serv/work/listCallRecord?servWorkId=${workId}`;
+    addLog('REQUEST', '查询通话记录', { url: recordUrl });
 
-    const recordRes = await fetch(`${aisPublicBaseUrl}/bfm-serv-work/serv/work/listCallRecord?servWorkId=${workId}`, {
-      method: 'GET',
-      headers: {
-        'Authorization': 'Bearer ' + authConfig.AK
-      }
-    });
-
+    const recordRes = await httpGet(recordUrl, { 'Authorization': `Bearer ${AK}` });
     const recordJson = await recordRes.json();
-    addLog('RESPONSE', '通话记录查询响应', recordJson);
+    addLog('RESPONSE', '通话记录查询响应', { status: recordJson.status, count: recordJson.data?.length || 0 });
 
-    if (recordJson.status !== 0 || !recordJson.data || recordJson.data.length === 0) {
-      addLog('WARNING', '无通话记录，跳过录音文本获取，直接创建跟单', { response: recordJson });
-      return { workId, hasCallRecord: false, audio_text: '', taskItemId, need_human_review: false };
+    if (recordJson.status !== 0 || !recordJson.data?.length) {
+      addLog('WARN', '无通话记录，跳过录音文本获取');
+      return { workId, hasCallRecord: false, voiceText: '', taskItemId, need_human_review: false };
     }
 
-    // 按 SKILL.md 筛选规则:
-    // 1. 优先选有 detectRecordId 的记录
-    // 2. 次选通话时长 > 10秒 的记录
-    // 3. 按 finishTime 取最新
-    // 4. callTypeName = "工程师", peerTypeName = "用户"
-
-    // 先筛选工程师→用户的通话记录
+    // 筛选工程师→用户的通话记录
     const engineerToUserRecords = recordJson.data.filter(r =>
       r.callTypeName === '工程师' && r.peerTypeName === '用户'
     );
-
-    // 按 SKILL.md 筛选规则:
-    // 1. 存在 detectRecordId 字段
-    // 2. 通话时长 > 10秒
-    // 3. callTypeName = "工程师"
-    // 4. peerTypeName = "用户"
-    // 5. 取结束时间最晚的一条
 
     // 筛选有 detectRecordId 且时长>10秒的记录
     const validRecords = engineerToUserRecords.filter(r => {
@@ -268,106 +229,82 @@ async function skill1_getRecordText(trackWorkId, taskItemId = 1202) {
 
     // 按 finishTime 降序排序，取最新
     validRecords.sort((a, b) => b.finishTime - a.finishTime);
-    const selectedRecord = validRecords.length > 0 ? validRecords[0] : engineerToUserRecords[0];
+    const selectedRecord = validRecords[0] || engineerToUserRecords[0];
 
-    addLog('INFO', `选中通话记录: detectRecordId=${selectedRecord.detectRecordId || '无'}, callDuration=${selectedRecord.callDuration}, remark=${selectedRecord.remark ? '有' : '无'}`);
+    if (!selectedRecord) {
+      addLog('WARN', '无有效通话记录');
+      return { workId, hasCallRecord: false, voiceText: '', taskItemId, need_human_review: false };
+    }
 
-    // 直接使用通话记录的 remark 作为录音文本
-    let voiceText = selectedRecord.remark || '';
+    addLog('INFO', `选中通话记录`, { 
+      detectRecordId: selectedRecord.detectRecordId || '无', 
+      callDuration: selectedRecord.callDuration 
+    });
 
-    // Step3: 有detectRecordId时，获取语音转文字内容
+    // Step 3: 获取语音转文字内容
+    let voiceText = '';
+    let voiceJson = null;
+    
     if (selectedRecord.detectRecordId) {
-      addLog('REQUEST', '获取语音转文字内容', {
-        url: `${aisPublicBaseUrl}/bfm-mds/detectRecord/voiceRecord/content?detectRecordId=${selectedRecord.detectRecordId}&pageIndex=1&pageSize=100`
-      });
+      const voiceUrl = `${aisPublicBaseUrl}/bfm-mds/detectRecord/voiceRecord/content?detectRecordId=${selectedRecord.detectRecordId}&pageIndex=1&pageSize=100`;
+      addLog('REQUEST', '获取语音转文字', { url: voiceUrl });
 
       try {
-        const voiceRes = await fetch(`${aisPublicBaseUrl}/bfm-mds/detectRecord/voiceRecord/content?detectRecordId=${selectedRecord.detectRecordId}&pageIndex=1&pageSize=100`, {
-          method: 'GET',
-          headers: { 'Authorization': 'Bearer ' + authConfig.AK }
-        });
-        var voiceJson = await voiceRes.json();
-        addLog('RESPONSE', '语音转文字响应', voiceJson);
-
-        if (voiceJson.status === 0 && voiceJson.data && voiceJson.data.items && voiceJson.data.items.length > 0) {
-          // 拼接对话内容
-          voiceText = voiceJson.data.items.map(item => `${item.role}: ${item.text}`).join('\n');
-          addLog('INFO', `获取到语音转文字内容：长度=${voiceText.length}`);
+        const voiceRes = await httpGet(voiceUrl, { 'Authorization': `Bearer ${AK}` });
+        voiceJson = await voiceRes.json();
+        
+        if (voiceJson.status === 0 && voiceJson.data?.items?.length) {
+          voiceText = voiceJson.data.items.map(item => 
+            `${item.role === 1 ? '工程师' : '用户'}: ${item.text}`
+          ).join('\n');
+          addLog('INFO', `获取到语音转文字: ${voiceJson.data.items.length}句`);
         }
       } catch (e) {
         addLog('WARN', `获取语音转文字失败: ${e.message}`);
-        var voiceJson = null;
       }
     }
 
-    addLog('SUCCESS', `Skill1 完成: 录音文本长度=${voiceText.length}`, {
-      workId,
-      hasVoiceText: !!voiceText,
-      hasDetectRecordId: !!selectedRecord.detectRecordId,
-      hasRemark: !!selectedRecord.remark
-    });
-
-    // 按最新技能规范：构造完整recording对象，转义后供意图识别使用
-    // 收集语音转文字items
-    let voiceTextItems = [];
-    let voiceTextTotal = 0;
-    
-    if (selectedRecord.detectRecordId && voiceJson && voiceJson.data && voiceJson.data.items) {
-      voiceTextTotal = voiceJson.data.total || voiceJson.data.items.length;
-      voiceTextItems = voiceJson.data.items.map(item => ({
-        role: item.role === 1 ? '工程师' : '用户',
-        text: item.text,
-        beginTime: parseInt(item.beginTime) || 0,
-        endTime: parseInt(item.endTime) || 0
-      }));
+    // 如果没有获取到语音转文字，使用 remark 作为备选
+    if (!voiceText && selectedRecord.remark) {
+      voiceText = selectedRecord.remark;
+      addLog('INFO', '使用通话记录remark作为录音文本');
     }
 
+    addLog('SUCCESS', `Skill1完成: 录音文本长度=${voiceText.length}`);
+
+    // 构造 recording 数据供 Skill2 使用
     const recordingData = {
       success: true,
-      trackWorkId,
-      workId,
-      callRecord: {
-        callRecordId: selectedRecord.callRecordId,
-        detectRecordId: selectedRecord.detectRecordId,
-        callTypeName: selectedRecord.callTypeName,
-        peerTypeName: selectedRecord.peerTypeName,
-        startTime: selectedRecord.startTime,
-        finishTime: selectedRecord.finishTime,
-        callDuration: selectedRecord.callDuration,
-        tapeUrl: selectedRecord.tapeUrl
-      },
-      voiceText: {
-        total: voiceTextTotal,
-        items: voiceTextItems
-      }
+      detect_record_id: selectedRecord.detectRecordId || '',
+      total: voiceJson?.data?.total || voiceJson?.data?.items?.length || 0,
+      fetched_count: voiceJson?.data?.items?.length || 0,
+      page_count: 1,
+      items: (voiceJson?.data?.items || []).map(item => ({
+        role: item.role,
+        text: item.text,
+        beginTime: String(item.beginTime || 0),
+        endTime: String(item.endTime || 0),
+        silenceDuration: String(item.silenceDuration || 0)
+      }))
     };
-
-    // 转义双引号，转换为字符串
-    const recordingStr = JSON.stringify(recordingData).replace(/"/g, '\\"');
 
     return {
       trackWorkId,
       workId,
       detectRecordId: selectedRecord.detectRecordId || null,
       voiceText,
-      recordingStr, // 新增：适配意图识别接口的转义后的字符串
+      recordingData,
       need_human_review: false
     };
   } catch (e) {
-    addLog('ERROR', `Skill1 执行异常: ${e.message}`);
+    addLog('ERROR', `Skill1执行异常: ${e.message}`);
     throw e;
   }
 }
 
-// Skill 2: 意图识别 (按 SKILL.md recording-intention 定义重写)
-async function skill2_recognizeIntent(audioText, detectRecordId = null) {
-  addLog('PROCESS', `开始执行 Skill2: 意图识别`, { hasText: !!audioText, detectRecordId });
-
-  const authConfig = await loadAuthConfig('recording-intention');
-  if (!authConfig) {
-    addLog('ERROR', '认证配置加载失败');
-    throw new Error('认证配置加载失败');
-  }
+// Skill 2: 意图识别
+async function skill2_recognizeIntent(audioText, detectRecordId = null, recordingData = null) {
+  addLog('PROCESS', 'Skill2: 意图识别', { hasText: !!audioText, detectRecordId });
 
   if (!audioText) {
     addLog('ERROR', '无录音文本');
@@ -375,81 +312,50 @@ async function skill2_recognizeIntent(audioText, detectRecordId = null) {
   }
 
   try {
-    // 按 SKILL.md 格式构造入参
-    // recording 字段是一个 JSON 字符串，包含 success, detect_record_id, total, items 等
-    let recordingData;
-
-    if (detectRecordId) {
-      // 有 detectRecordId，调用 API 获取完整的语音转文字数据
-      addLog('REQUEST', '获取语音转文字详情', {
-        url: `${currentConfig.aisPublicBaseUrl}/bfm-mds/detectRecord/voiceRecord/content?detectRecordId=${detectRecordId}&pageIndex=1&pageSize=100`
-      });
-
-      try {
-        const voiceRes = await fetch(`${currentConfig.aisPublicBaseUrl}/bfm-mds/detectRecord/voiceRecord/content?detectRecordId=${detectRecordId}&pageIndex=1&pageSize=100`, {
-          method: 'GET',
-          headers: { 'Authorization': 'Bearer ' + authConfig.AK }
-        });
-        const voiceJson = await voiceRes.json();
-
-        // 按 SKILL.md 格式构造 recording 数据
-        recordingData = {
-          success: voiceJson.success === true,
-          detect_record_id: detectRecordId,
-          total: voiceJson.total || 0,
-          fetched_count: voiceJson.fetched_count || (voiceJson.items?.length || 0),
-          page_count: voiceJson.page_count || 1,
-          items: voiceJson.items || []
-        };
-        addLog('INFO', `获取语音数据: total=${recordingData.total}, items=${recordingData.items.length}`);
-      } catch (e) {
-        addLog('WARN', `获取语音数据失败，降级使用纯文本: ${e.message}`);
-        recordingData = {
-          success: true,
-          detect_record_id: '',
-          total: 1,
-          fetched_count: 1,
-          page_count: 1,
-          items: [{ role: '未知', text: audioText, beginTime: '0', endTime: '0', silenceDuration: '0' }]
-        };
-      }
-    } else {
-      // 没有 detectRecordId，直接使用纯文本
-      recordingData = {
+    // 优先使用传入的 recordingData
+    let finalRecordingData = recordingData;
+    
+    if (!finalRecordingData) {
+      // 降级：构造简单的 recordingData
+      finalRecordingData = {
         success: true,
-        detect_record_id: '',
+        detect_record_id: detectRecordId || '',
         total: 1,
         fetched_count: 1,
         page_count: 1,
         items: [{ role: '未知', text: audioText, beginTime: '0', endTime: '0', silenceDuration: '0' }]
       };
     }
+    
+    addLog('INFO', `使用语音数据: total=${finalRecordingData.total}, items=${finalRecordingData.items?.length || 0}`);
 
-    // 将 recordingData 序列化为 JSON 字符串
-    const recordingStr = JSON.stringify(recordingData, null, 0);
+    const recordingStr = JSON.stringify(finalRecordingData);
     const requestBody = { inputs: { recording: recordingStr } };
 
-    // 按 SKILL.md 使用正确的 API 端点
-    // 固定地址，不随环境变化
-    const intentApiUrl = 'https://test-ai.xiujiadian.com/zmn-ai-workflow/v1/961296a26366462b9fbef746ae4ea2cf/execute_flow';
-    addLog('REQUEST', '调用意图识别API', {
-      url: intentApiUrl,
-      body: requestBody
-    });
+    addLog('REQUEST', '调用意图识别API', { url: CONFIG.INTENT_API_URL });
 
-    const response = await fetch(intentApiUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + authConfig.AK
-      },
-      body: JSON.stringify(requestBody)
-    });
+    const response = await httpPost(CONFIG.INTENT_API_URL,
+      { 'ak': `Bearer ${CONFIG.AI_WORKFLOW_AK}` },
+      requestBody
+    );
 
-    const json = await response.json();
-    addLog('RESPONSE', '意图识别响应', json);
+    const responseText = await response.text();
+    addLog('INFO', `响应状态码: ${response.status}, 长度: ${responseText.length}`);
 
-    // 兼容多种返回格式: success/SUCCESS, data/run_result
+    if (!responseText?.trim()) {
+      addLog('ERROR', '意图识别API返回空响应');
+      return { intent_name: 'other', confidence: 0, need_human_review: true };
+    }
+
+    let json;
+    try {
+      json = JSON.parse(responseText);
+    } catch (e) {
+      addLog('ERROR', `响应解析失败: ${e.message}`);
+      return { intent_name: 'other', confidence: 0, need_human_review: true };
+    }
+
+    // 解析意图结果
     const isSuccess = json.success === true || json.message === 'SUCCESS' || json.status === 200;
     const runResultText = json.data?.run_result || json.data;
 
@@ -458,7 +364,7 @@ async function skill2_recognizeIntent(audioText, detectRecordId = null) {
       return { intent_name: 'other', confidence: 0, need_human_review: true };
     }
 
-    // 解析 run_result (可能是字符串格式 ```json...```)
+    // 解析 run_result
     let intentionData = {};
     try {
       const jsonMatch = runResultText.match(/```json\n?([\s\S]*?)\n?```/);
@@ -473,354 +379,229 @@ async function skill2_recognizeIntent(audioText, detectRecordId = null) {
       addLog('WARN', `解析意图结果失败: ${e.message}`);
     }
 
-    addLog('INFO', '解析意图结果', intentionData);
-
-    // 兼容大小写: confidence_score/Confidence_score
     const category = intentionData.intention?.category || '';
     const confidenceScore = intentionData.intention?.confidence_score || intentionData.intention?.Confidence_score || 0;
 
     // 映射到四种意图
     let intentName = 'other';
     if (category.includes('确认上门') || category.includes('确定上门') || category.includes('上门时间')) {
-      intentName = 'confirm_visit';  // 确认上门
+      intentName = 'confirm_visit';
     } else if (category.includes('询价') || category.includes('报价') || category.includes('价格')) {
-      intentName = 'price_query';   // 用户询价
+      intentName = 'price_query';
     } else if (category.includes('不需要') || category.includes('取消') || category.includes('不做了')) {
-      intentName = 'cancel';        // 取消
+      intentName = 'cancel';
     }
 
-    addLog('SUCCESS', `Skill2 完成: category=${category}, intent=${intentName}, confidence=${confidenceScore}`);
+    addLog('SUCCESS', `Skill2完成: category=${category}, intent=${intentName}, confidence=${confidenceScore}`);
 
     // 置信度低于阈值时，触发创建跟单
     if (confidenceScore < 0.75) {
       intentName = 'price_query';
-      addLog('INFO', `置信度低于阈值0.75，触发创建跟单任务`);
+      addLog('INFO', '置信度低于0.75，触发创建跟单');
     }
 
     return {
       intent_name: intentName,
       confidence: confidenceScore,
-      category: category,
-      need_human_review: false  // 低于阈值时自动触发创建跟单，不再人工复核
+      category,
+      need_human_review: false
     };
-
   } catch (e) {
-    addLog('ERROR', `Skill2 执行异常: ${e.message}`);
+    addLog('ERROR', `Skill2执行异常: ${e.message}`);
     throw e;
   }
 }
 
-// Skill 3: 跟单处理 (真实 API)
+// Skill 3: 跟单处理
 async function skill3_handleTrack(workId, trackWorkId, intentName) {
-  addLog('PROCESS', `开始执行 Skill3: 跟单处理`, { workId, trackWorkId, intentName });
+  addLog('PROCESS', 'Skill3: 跟单处理', { workId, trackWorkId, intentName });
   
   const authConfig = await loadAuthConfig('handle-track-work');
-  if (!authConfig) {
-    addLog('ERROR', '认证配置加载失败');
-    throw new Error('认证配置加载失败');
-  }
+  if (!authConfig) throw new Error('认证配置加载失败');
 
-  const handleRemark = intentName || 'AI自动处理';
-  
   const body = {
     workId,
     trackWorkId,
     trackContentId: 1191,
-    handleOptionList: [
-      {
-        optionId: 111,
-        optionName: '挂起申请驳回',
-        optionLevel: 0
-      }
-    ],
+    handleOptionList: [{
+      optionId: 111,
+      optionName: '挂起申请驳回',
+      optionLevel: 0
+    }],
     handleJumpType: 0,
-    handleRemark,
+    handleRemark: intentName || 'AI自动处理',
     isCompleteTrack: 1
   };
 
-  addLog('REQUEST', '提交跟单处理', { 
-    url: `${currentConfig.trackBaseUrl}/amis/track/save/newHandle`,
-    body
-  });
+  addLog('REQUEST', '提交跟单处理', { url: `${currentConfig.trackBaseUrl}/amis/track/save/newHandle` });
 
-  const response = await fetch(`${currentConfig.trackBaseUrl}/amis/track/save/newHandle`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': 'Bearer ' + authConfig.AK
-    },
-    body: JSON.stringify(body)
-  });
+  const response = await httpPost(`${currentConfig.trackBaseUrl}/amis/track/save/newHandle`,
+    { 'Authorization': `Bearer ${authConfig.AK}` },
+    body
+  );
 
   const xmlText = await response.text();
-  addLog('RESPONSE', '跟单处理响应', { xml: xmlText });
+  addLog('RESPONSE', '跟单处理响应', { xml: xmlText.substring(0, 200) });
 
-  const statusMatch = xmlText.match(/<status>(\d+)<\/status>/);
-  const msgMatch = xmlText.match(/<msg>([^<]*)<\/msg>/);
-  
-  const status = statusMatch ? statusMatch[1] : '-1';
-  const msg = msgMatch ? msgMatch[1] : '未知错误';
+  const status = parseXmlValue(xmlText, 'status');
+  const msg = parseXmlValue(xmlText, 'msg');
   
   if (status !== '0') {
-    addLog('ERROR', `跟单处理失败: ${msg}`, { status, xml: xmlText });
     throw new Error(`跟单处理失败: ${msg}`);
   }
   
-  addLog('SUCCESS', `Skill3 完成: ${msg}`);
+  addLog('SUCCESS', `Skill3完成: ${msg}`);
   return { success: true, msg };
 }
 
-// Skill 4: 改约 (按 SKILL.md modify-duty-time 定义重写)
+// Skill 4: 改约
 async function skill4_modifyDutyTime(trackWorkId) {
-  addLog('PROCESS', `开始执行 Skill4: 改约`, { trackWorkId });
+  addLog('PROCESS', 'Skill4: 改约', { trackWorkId });
 
   const authConfig = await loadAuthConfig('modify-duty-time');
-  if (!authConfig) {
-    addLog('ERROR', '认证配置加载失败');
-    throw new Error('认证配置加载失败');
-  }
+  if (!authConfig) throw new Error('认证配置加载失败');
+
+  const { trackBaseUrl, aisBaseUrl, mcc } = currentConfig;
 
   try {
-    // Step 2: 根据跟单ID查询工单号
-    addLog('REQUEST', '查询工单号', {
-      url: '${baseUrl}/amis/track/list',
-      body: { trackWorkId }
-    });
+    // Step 1: 查询工单号
+    addLog('REQUEST', '查询工单号', { url: `${trackBaseUrl}/amis/track/list` });
 
-    const listRes = await fetch('${baseUrl}/amis/track/list', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + authConfig.AK
-      },
-      body: JSON.stringify({ trackWorkId })
-    });
+    const listRes = await httpPost(`${trackBaseUrl}/amis/track/list`,
+      { 'Authorization': `Bearer ${authConfig.AK}` },
+      { trackWorkId }
+    );
 
     const listJson = await listRes.json();
-    addLog('RESPONSE', '工单号查询响应', listJson);
-
-    let servWorkId;
-    if (listJson.status === 0 && listJson.data && listJson.data.items && listJson.data.items.length > 0) {
-      servWorkId = listJson.data.items[0].workId;
-    } else {
-      addLog('ERROR', '未找到该跟单ID对应的工单');
-      return { success: false, msg: listJson.msg || '未找到工单' };
+    
+    if (listJson.status !== 0 || !listJson.data?.items?.length) {
+      throw new Error(listJson.msg || '未找到工单');
     }
+    
+    const servWorkId = listJson.data.items[0].workId;
     addLog('INFO', `找到工单号: ${servWorkId}`);
 
-    // Step 3: 登录获取 sessionId 并查询人员信息
+    // Step 2: 登录获取 sessionId
     addLog('PROCESS', '登录获取人员信息');
 
-    const mccUrl = authConfig.mcc;
-    const loginRes = await fetch('${mccUrl}/cas/login.action', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ staffName: authConfig.username, password: authConfig.password }),
-      redirect: 'manual'
-    });
+    const loginRes = await httpPost(`${mcc}/cas/login.action`,
+      {},
+      { staffName: authConfig.username, password: authConfig.password }
+    );
 
     addLog('INFO', `登录响应状态: ${loginRes.status}`);
 
-    // 提取 sessionId - 支持多种浏览器/Node.js 环境
+    // 提取 sessionId
     let sessionId = '';
-    let allCookies = [];
-
-    // 方法1: getSetCookie() (较新的标准方法)
-    if (loginRes.headers.getSetCookie) {
-      allCookies = loginRes.headers.getSetCookie();
-    }
-
-    // 方法2: 遍历 headers 获取 set-cookie (兼容性方案)
-    if (allCookies.length === 0) {
-      try {
-        loginRes.headers.forEach((value, key) => {
-          if (key.toLowerCase() === 'set-cookie') {
-            allCookies.push(value);
-          }
-        });
-      } catch (e) {}
-    }
-
-    addLog('INFO', `获取到 ${allCookies.length} 个 cookie`);
-
-    // 解析 cookie 查找 sessionId
-    for (const cookie of allCookies) {
-      addLog('DEBUG', `Cookie: ${cookie.substring(0, 100)}...`);
-      if (cookie.includes('zmn.id=') || cookie.includes('session')) {
-        const match = cookie.match(/(?:zmn\.id|session)[=:](\w+)/);
-        if (match) {
-          sessionId = match[1];
-          break;
-        }
+    const cookies = loginRes.headers.getSetCookie?.() || [];
+    
+    for (const cookie of cookies) {
+      const match = cookie.match(/zmn\.id=([^;]+)/);
+      if (match) {
+        sessionId = match[1];
+        break;
       }
     }
-
-    // 备用：尝试直接从 cookie 字符串匹配
-    if (!sessionId && allCookies.length > 0) {
-      const cookieStr = allCookies.join('; ');
-      const sessionMatch = cookieStr.match(/zmn\.id=([^;]+)/);
-      if (sessionMatch) {
-        sessionId = sessionMatch[1];
-      }
-    }
-
-    addLog('INFO', `解析到的 sessionId: ${sessionId ? sessionId.substring(0, 20) + '...' : '为空'}`);
 
     if (!sessionId) {
-      addLog('ERROR', '登录成功但未获取到sessionId', { cookies: allCookies });
-      return { success: false, msg: '登录成功但未获取到sessionId' };
+      throw new Error('未获取到sessionId');
     }
 
-    // 获取人员信息
-    const staffRes = await fetch('${baseUrl}/ratel-api/base-mcc/mcStaffForeignListRemoteService/getLoginStaffBySessionId', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + authConfig.AK
-      },
-      body: JSON.stringify({ sessionId })
-    });
+    // Step 3: 获取人员信息
+    const staffRes = await httpPost(`${trackBaseUrl}/ratel-api/base-mcc/mcStaffForeignListRemoteService/getLoginStaffBySessionId`,
+      { 'Authorization': `Bearer ${authConfig.AK}` },
+      { sessionId }
+    );
 
-    const staffText = await staffRes.text();
-    let staffInfo = { realName: '', deptName: '', deptId: 0, staffId: 0 };
-    try {
-      const staffData = JSON.parse(staffText);
-      if (staffData.success === true && staffData.data) {
-        staffInfo = staffData.data;
-      }
-    } catch (e) {
-      // 尝试从 XML 提取
-      const realName = staffText.match(/<realName>([^<]+)<\/realName>/);
-      const deptName = staffText.match(/<deptName>([^<]+)<\/deptName>/);
-      const deptId = staffText.match(/<deptId>([^<]+)<\/deptId>/);
-      const staffIdMatch = staffText.match(/<staffId>([^<]+)<\/staffId>/);
-      if (realName && staffIdMatch) {
-        staffInfo = {
-          realName: realName[1],
-          deptName: deptName ? deptName[1] : '',
-          deptId: deptId ? parseInt(deptId[1]) : 0,
-          staffId: staffIdMatch ? parseInt(staffIdMatch[1]) : 0
-        };
-      }
-    }
+    const staffData = await staffRes.json();
+    const staffInfo = staffData.data || { realName: '', deptName: '', deptId: 0, staffId: 0 };
     addLog('INFO', `获取人员信息: ${staffInfo.realName}`);
 
     // Step 4: 修改预约时间
-    function formatTime(date) {
-      const y = date.getFullYear();
-      const M = String(date.getMonth() + 1).padStart(2, '0');
-      const d = String(date.getDate()).padStart(2, '0');
-      const h = String(date.getHours()).padStart(2, '0');
-      const m = String(date.getMinutes()).padStart(2, '0');
-      const s = String(date.getSeconds()).padStart(2, '0');
-      return `${y}-${M}-${d} ${h}:${m}:${s}`;
-    }
+    const formatTime = (date) => {
+      const pad = (n) => String(n).padStart(2, '0');
+      return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+    };
 
     const now = new Date();
-    const operateTime = formatTime(now);
     const dutyDate = new Date(now);
     dutyDate.setDate(dutyDate.getDate() + 2);
     dutyDate.setHours(9, 0, 0, 0);
-    const dutyTime = formatTime(dutyDate);
 
-    const body = {
-      operateTime,
+    const modifyBody = {
+      operateTime: formatTime(now),
       servWorkId,
       operator: staffInfo.realName,
       operatorDeptName: staffInfo.deptName,
-      dutyTime,
+      dutyTime: formatTime(dutyDate),
       operatorDeptId: staffInfo.deptId,
       operatorId: String(staffInfo.staffId),
       operatorIdentity: 2
     };
 
-    addLog('REQUEST', '提交改约', {
-      url: 'currentConfig.aisBaseUrl/ratel-api/serv-work-general-agg/servWorkModifyDutyTimeRemoteService/modifyDutyTime',
-      body
-    });
+    addLog('REQUEST', '提交改约', { url: `${aisBaseUrl}/ratel-api/serv-work-general-agg/servWorkModifyDutyTimeRemoteService/modifyDutyTime` });
 
-    const response = await fetch('currentConfig.aisBaseUrl/ratel-api/serv-work-general-agg/servWorkModifyDutyTimeRemoteService/modifyDutyTime', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + authConfig.AK,
-        'abtag': 'p0342'
-      },
-      body: JSON.stringify(body)
-    });
+    const modifyRes = await httpPost(`${aisBaseUrl}/ratel-api/serv-work-general-agg/servWorkModifyDutyTimeRemoteService/modifyDutyTime`,
+      { 'Authorization': `Bearer ${authConfig.AK}`, 'abtag': 'p0342' },
+      modifyBody
+    );
 
-    const xmlText = await response.text();
-    addLog('RESPONSE', '改约响应', { xml: xmlText.substring(0, 500) });
+    const xmlText = await modifyRes.text();
+    addLog('RESPONSE', '改约响应', { xml: xmlText.substring(0, 200) });
 
-    // 解析响应
     let success = false;
     let msg = '未知错误';
+    
     try {
       const jsonResult = JSON.parse(xmlText);
       success = jsonResult.success === true;
       msg = jsonResult.msg || '未知错误';
-    } catch (e) {
-      const statusMatch = xmlText.match(/<status>(\d+)<\/status>/);
-      const msgMatch = xmlText.match(/<msg>([^<]*)<\/msg>/);
-      success = statusMatch && statusMatch[1] === '200';
-      msg = msgMatch ? msgMatch[1] : '未知错误';
+    } catch {
+      success = parseXmlValue(xmlText, 'status') === '200';
+      msg = parseXmlValue(xmlText, 'msg') || '未知错误';
     }
 
     if (!success) {
-      addLog('ERROR', `改约失败: ${msg}`);
-      return { success: false, msg };
+      throw new Error(`改约失败: ${msg}`);
     }
 
-    addLog('SUCCESS', `Skill4 完成: 改约成功, 新时间=${dutyTime}`);
-    return { success: true, newTime: dutyTime };
+    addLog('SUCCESS', `Skill4完成: 改约成功`);
+    return { success: true, newTime: modifyBody.dutyTime };
   } catch (e) {
-    addLog('ERROR', `Skill4 执行异常: ${e.message}`);
+    addLog('ERROR', `Skill4执行异常: ${e.message}`);
     throw e;
   }
 }
 
-// Skill 5: 取消工单 (按 SKILL.md cancel-work 定义重写)
+// Skill 5: 取消工单
 async function skill5_cancelWork(trackWorkId) {
-  addLog('PROCESS', `开始执行 Skill5: 取消工单`, { trackWorkId });
+  addLog('PROCESS', 'Skill5: 取消工单', { trackWorkId });
 
   const authConfig = await loadAuthConfig('cancel-work');
-  if (!authConfig) {
-    addLog('ERROR', '认证配置加载失败');
-    throw new Error('认证配置加载失败');
-  }
+  if (!authConfig) throw new Error('认证配置加载失败');
+
+  const { trackBaseUrl, aisBaseUrl } = currentConfig;
 
   try {
-    // Step 2: 根据跟单ID查询工单号
-    addLog('REQUEST', '查询工单号', {
-      url: '${baseUrl}/amis/track/list',
-      body: { trackWorkId }
-    });
+    // Step 1: 查询工单号
+    addLog('REQUEST', '查询工单号', { url: `${trackBaseUrl}/amis/track/list` });
 
-    const listRes = await fetch('${baseUrl}/amis/track/list', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + authConfig.AK
-      },
-      body: JSON.stringify({ trackWorkId })
-    });
+    const listRes = await httpPost(`${trackBaseUrl}/amis/track/list`,
+      { 'Authorization': `Bearer ${authConfig.AK}` },
+      { trackWorkId }
+    );
 
     const listJson = await listRes.json();
-    addLog('RESPONSE', '工单号查询响应', listJson);
-
-    let servWorkId, servOrderId;
-    if (listJson.status === 0 && listJson.data && listJson.data.items && listJson.data.items.length > 0) {
-      const item = listJson.data.items[0];
-      servWorkId = item.workId;
-      servOrderId = item.servOrderId;
-    } else {
-      addLog('ERROR', '未找到该跟单ID对应的工单');
-      return { success: false, msg: listJson.msg || '未找到工单' };
+    
+    if (listJson.status !== 0 || !listJson.data?.items?.length) {
+      throw new Error(listJson.msg || '未找到工单');
     }
+    
+    const { workId: servWorkId, servOrderId } = listJson.data.items[0];
     addLog('INFO', `找到工单号: ${servWorkId}, 服务订单号: ${servOrderId}`);
 
-    // Step 3: 调用工单取消接口
-    const body = {
+    // Step 2: 调用工单取消接口
+    const cancelBody = {
       applySource: 17,
       operator: '系统',
       operatorId: 1,
@@ -830,192 +611,158 @@ async function skill5_cancelWork(trackWorkId) {
       servWorkId
     };
 
-    addLog('REQUEST', '提交取消', {
-      url: 'currentConfig.aisBaseUrl/ratel-api/serv-work-general-agg/cancelApplyModifyRemoteService/submitCancelApply',
-      body
-    });
+    addLog('REQUEST', '提交取消', { url: `${aisBaseUrl}/ratel-api/serv-work-general-agg/cancelApplyModifyRemoteService/submitCancelApply` });
 
-    const response = await fetch('currentConfig.aisBaseUrl/ratel-api/serv-work-general-agg/cancelApplyModifyRemoteService/submitCancelApply', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + authConfig.AK
-      },
-      body: JSON.stringify(body)
-    });
+    const cancelRes = await httpPost(`${aisBaseUrl}/ratel-api/serv-work-general-agg/cancelApplyModifyRemoteService/submitCancelApply`,
+      { 'Authorization': `Bearer ${authConfig.AK}` },
+      cancelBody
+    );
 
-    const xmlText = await response.text();
-    addLog('RESPONSE', '取消响应', { xml: xmlText.substring(0, 500) });
+    const xmlText = await cancelRes.text();
+    addLog('RESPONSE', '取消响应', { xml: xmlText.substring(0, 200) });
 
-    // 解析响应
     let success = false;
     let msg = '未知错误';
+    
     try {
       const jsonResult = JSON.parse(xmlText);
       success = jsonResult.success === true;
       msg = jsonResult.msg || '未知错误';
-    } catch (e) {
-      const statusMatch = xmlText.match(/<status>(\d+)<\/status>/);
-      const msgMatch = xmlText.match(/<msg>([^<]*)<\/msg>/);
-      success = statusMatch && statusMatch[1] === '200';
-      msg = msgMatch ? msgMatch[1] : '未知错误';
+    } catch {
+      success = parseXmlValue(xmlText, 'status') === '200';
+      msg = parseXmlValue(xmlText, 'msg') || '未知错误';
     }
 
     if (!success) {
-      addLog('ERROR', `取消失败: ${msg}`);
-      return { success: false, msg };
+      throw new Error(`取消失败: ${msg}`);
     }
 
-    addLog('SUCCESS', `Skill5 完成: 取消成功`);
+    addLog('SUCCESS', 'Skill5完成: 取消成功');
     return { success: true, msg };
   } catch (e) {
-    addLog('ERROR', `Skill5 执行异常: ${e.message}`);
+    addLog('ERROR', `Skill5执行异常: ${e.message}`);
     throw e;
   }
 }
 
-// Skill 6: 创建跟单任务 (按 SKILL.md create-track-task 定义重写)
+// Skill 6: 创建跟单任务
 async function skill6_createTrackTask(trackWorkId, workId, taskItemId = 1202) {
-  addLog('PROCESS', `开始执行 Skill6: 创建跟单任务`, {
-    trackWorkId,
-    workId,
-    taskItemId
-  });
+  addLog('PROCESS', 'Skill6: 创建跟单任务', { trackWorkId, workId, taskItemId });
 
   const authConfig = await loadAuthConfig('create-track-task');
-  if (!authConfig) {
-    addLog('ERROR', '认证配置加载失败');
-    throw new Error('认证配置加载失败');
-  }
+  if (!authConfig) throw new Error('认证配置加载失败');
 
-  try {
-    // Step 2: 调用创建接口（无需查询跟单详情）
-    const createBody = {
-      trackWorkId: trackWorkId,
-      servWorkId: workId,
-      taskItemId: taskItemId
-    };
+  const createBody = {
+    trackWorkId,
+    servWorkId: workId,
+    taskItemId
+  };
 
-    addLog('REQUEST', '创建跟单任务', {
-      url: `https://ais.xiujiadian.com/zmn-track-admin/amis/track/add/task`,
-      body: createBody
-    });
+  const url = `${currentConfig.trackBaseUrl}/amis/track/add/task`;
+  addLog('REQUEST', '创建跟单任务', { url });
 
-    const response = await fetch(`https://ais.xiujiadian.com/zmn-track-admin/amis/track/add/task`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + authConfig.AK
-      },
-      body: JSON.stringify(createBody)
-    });
+  const response = await httpPost(url,
+    { 'Authorization': `Bearer ${authConfig.AK}` },
+    createBody
+  );
 
-    const resultText = await response.text();
-    addLog('RESPONSE', '创建响应', { text: resultText.substring(0, 500) });
+  const resultText = await response.text();
+  addLog('RESPONSE', '创建响应', { text: resultText.substring(0, 200) });
 
-    // XML 解析辅助函数
-    const getXmlValue = (xml, tag) => {
-      const match = xml.match(new RegExp(`<${tag}>([^<]*)</${tag}`));
-      return match ? match[1] : '';
-    };
-
-    const status = getXmlValue(resultText, 'status');
-    const msg = getXmlValue(resultText, 'msg');
-    
-    if (status === '0') {
-      addLog('SUCCESS', `Skill6 完成: 创建成功`);
-      return { success: true, msg: '创建成功' };
-    } else {
-      addLog('ERROR', `创建跟单任务失败: ${msg || '未知错误'}`);
-      return { success: false, msg: msg || '未知错误' };
-    }
-
-  } catch (e) {
-    addLog('ERROR', `Skill6 执行异常: ${e.message}`);
-    throw e;
+  const status = parseXmlValue(resultText, 'status');
+  const msg = parseXmlValue(resultText, 'msg');
+  
+  if (status === '0') {
+    addLog('SUCCESS', 'Skill6完成: 创建成功');
+    return { success: true, msg: '创建成功' };
+  } else {
+    throw new Error(`创建跟单任务失败: ${msg || '未知错误'}`);
   }
 }
 
 // ==================== 主工作流 ====================
 async function runWorkflow(trackWorkId, taskItemId = 1202, env = 'test') {
-  log('========== 挂起任务工作流开始 ==========', 'info');
-  log(`输入: trackWorkId=${trackWorkId}, taskItemId=${taskItemId}, env=${env}`, 'info');
+  console.log('\n========== 挂起任务工作流 ==========');
+  console.log(`▶ 跟单ID: ${trackWorkId}`);
+  console.log(`▶ 任务项ID: ${taskItemId}`);
+  console.log(`▶ 环境: ${env === 'prod' ? '生产' : '测试'}`);
+  console.log('====================================\n');
   
   const steps = [];
   let currentStep = 0;
-  let skill1Result = null; // 提前定义，兜底流程可以访问
+  let skill1Result = null;
+  
+  const addStep = (name, status = 'running') => {
+    currentStep++;
+    steps.push({ step: currentStep, name, status });
+    return currentStep - 1;
+  };
+
+  const updateStep = (idx, status, result = null) => {
+    steps[idx] = { ...steps[idx], status, ...(result && { result }) };
+  };
   
   try {
     // Step 1: Skill1 - 获取录音文本
-    currentStep++;
-    steps.push({ step: currentStep, name: 'Skill1: 获取录音文本', status: 'running' });
+    const step1Idx = addStep('Skill1: 获取录音文本');
     skill1Result = await skill1_getRecordText(trackWorkId, taskItemId);
     
     if (skill1Result.need_human_review) {
-      steps[steps.length - 1] = { ...steps[steps.length - 1], status: 'failed' };
+      updateStep(step1Idx, 'failed');
       throw new Error('录音文本获取失败');
     }
     
-    steps[steps.length - 1] = { ...steps[steps.length - 1], status: 'completed', result: skill1Result };
+    updateStep(step1Idx, 'completed', skill1Result);
     
     // Step 2: Skill2 - 意图识别
-    // 无录音文本或无通话记录时，跳过意图识别，直接创建跟单
     let intentName;
-    if (!skill1Result.voiceText || skill1Result.hasCallRecord === false) {
-      addLog('INFO', '无通话记录或录音文本，跳过意图识别，直接创建跟单');
+    let step2Idx;
+    
+    if (!skill1Result.voiceText) {
+      addLog('INFO', '无录音文本，跳过意图识别');
       intentName = 'price_query';
-      steps.push({ step: currentStep + 1, name: 'Skill2: 意图识别', status: 'skipped', result: { reason: skill1Result.hasCallRecord === false ? '无通话记录' : '无录音文本' } });
+      step2Idx = addStep('Skill2: 意图识别', 'skipped');
+      updateStep(step2Idx, 'skipped', { reason: '无录音文本' });
     } else {
-      currentStep++;
-      steps.push({ step: currentStep, name: 'Skill2: 意图识别', status: 'running' });
-      const skill2Result = await skill2_recognizeIntent(skill1Result.voiceText, skill1Result.detectRecordId);
+      step2Idx = addStep('Skill2: 意图识别');
+      const skill2Result = await skill2_recognizeIntent(
+        skill1Result.voiceText, 
+        skill1Result.detectRecordId, 
+        skill1Result.recordingData
+      );
 
       if (skill2Result.need_human_review || skill2Result.confidence < 0.75) {
-        steps[steps.length - 1] = { ...steps[steps.length - 1], status: 'failed' };
+        updateStep(step2Idx, 'failed');
         throw new Error('意图识别置信度低');
       }
 
-      steps[steps.length - 1] = { ...steps[steps.length - 1], status: 'completed', result: skill2Result };
+      updateStep(step2Idx, 'completed', skill2Result);
       intentName = skill2Result.intent_name;
     }
     
-    // Step 3: 根据意图执行
-    addLog('INFO', `意图分类: ${intentName}`);
     addLog('INFO', `意图分类: ${intentName}`);
     
-    // Skill3: 跟单处理（所有分支都需要）
-    currentStep++;
-    steps.push({ step: currentStep, name: 'Skill3: 跟单处理', status: 'running' });
+    // Step 3: Skill3 - 跟单处理（所有分支都需要）
+    const step3Idx = addStep('Skill3: 跟单处理');
     const skill3Result = await skill3_handleTrack(skill1Result.workId, trackWorkId, intentName);
-    steps[steps.length - 1] = { ...steps[steps.length - 1], status: 'completed', result: skill3Result };
+    updateStep(step3Idx, 'completed', skill3Result);
     
-    // Skill 4/5/6: 根据意图路由（四种）
+    // Step 4: 根据意图路由
     let finalResult;
+    const step4Idx = addStep(`Skill4-${intentName}: 执行意图动作`);
 
-    if (intentName === 'confirm_visit') {
-      // 确认上门 → 改约
-      currentStep++;
-      steps.push({ step: currentStep, name: 'Skill4: 改约', status: 'running' });
-      const skill4Result = await skill4_modifyDutyTime(trackWorkId);  // 传入 trackWorkId
-      steps[steps.length - 1] = { ...steps[steps.length - 1], status: 'completed', result: skill4Result };
-      finalResult = skill4Result;
-
-    } else if (intentName === 'cancel') {
-      // 取消 → 取消工单
-      currentStep++;
-      steps.push({ step: currentStep, name: 'Skill5: 取消', status: 'running' });
-      const skill5Result = await skill5_cancelWork(trackWorkId);  // 传入 trackWorkId
-      steps[steps.length - 1] = { ...steps[steps.length - 1], status: 'completed', result: skill5Result };
-      finalResult = skill5Result;
-
-    } else {
-      // 用户询价 / 其他意图 → 创建跟单
-      currentStep++;
-      steps.push({ step: currentStep, name: 'Skill6: 生成跟单', status: 'running' });
-      const skill6Result = await skill6_createTrackTask(trackWorkId, skill1Result.workId, skill1Result.taskItemId);  // 传入 trackWorkId + workId
-      steps[steps.length - 1] = { ...steps[steps.length - 1], status: 'completed', result: skill6Result };
-      finalResult = skill6Result;
+    switch (intentName) {
+      case 'confirm_visit':
+        finalResult = await skill4_modifyDutyTime(trackWorkId);
+        break;
+      case 'cancel':
+        finalResult = await skill5_cancelWork(trackWorkId);
+        break;
+      default:
+        finalResult = await skill6_createTrackTask(trackWorkId, skill1Result.workId, taskItemId);
     }
+    
+    updateStep(step4Idx, 'completed', finalResult);
     
     addLog('SUCCESS', '========== 工作流执行完成 ==========');
     printSummary(true, null, null, steps);
@@ -1030,21 +777,17 @@ async function runWorkflow(trackWorkId, taskItemId = 1202, env = 'test') {
   } catch (error) {
     addLog('ERROR', `工作流执行异常: ${error.message}`);
     
-    // 兜底流程：发生错误时，仍尝试执行 Skill3 和 Skill6
+    // 兜底流程
     addLog('INFO', '触发兜底流程...');
     
     try {
-      // Skill3: 跟单处理
-      currentStep++;
-      steps.push({ step: currentStep, name: 'Skill3: 跟单处理(兜底)', status: 'running' });
+      const fallbackIdx1 = addStep('Skill3: 跟单处理(兜底)');
       const skill3Result = await skill3_handleTrack(skill1Result?.workId, trackWorkId, 'price_query');
-      steps[steps.length - 1] = { ...steps[steps.length - 1], status: 'completed', result: skill3Result };
+      updateStep(fallbackIdx1, 'completed', skill3Result);
       
-      // Skill6: 创建跟单任务
-      currentStep++;
-      steps.push({ step: currentStep, name: 'Skill6: 生成跟单(兜底)', status: 'running' });
+      const fallbackIdx2 = addStep('Skill6: 生成跟单(兜底)');
       const skill6Result = await skill6_createTrackTask(trackWorkId, skill1Result?.workId, taskItemId);
-      steps[steps.length - 1] = { ...steps[steps.length - 1], status: 'completed', result: skill6Result };
+      updateStep(fallbackIdx2, 'completed', skill6Result);
       
       addLog('SUCCESS', '兜底流程执行完成');
       printSummary(true, null, null, steps);
@@ -1060,6 +803,7 @@ async function runWorkflow(trackWorkId, taskItemId = 1202, env = 'test') {
     } catch (fallbackError) {
       addLog('ERROR', `兜底流程也失败: ${fallbackError.message}`);
       printSummary(false, `Step ${currentStep}`, error.message, steps);
+      
       return {
         success: false,
         fail_at: `Step ${currentStep}`,
@@ -1075,22 +819,20 @@ async function runWorkflow(trackWorkId, taskItemId = 1202, env = 'test') {
 // ==================== 启动 ====================
 const args = process.argv.slice(2);
 const trackWorkId = args[0];
-const taskItemId = args[1] || 1202; // 默认任务项ID为1202
-// 将参数 '生产'/'prod' 映射为 'prod'，其他为测试
+const taskItemId = args[1] || 1202;
 const rawEnv = args[2] || 'test';
+
 globalEnv = (rawEnv === '生产' || rawEnv === 'prod') ? 'prod' : 'test';
-const env = globalEnv;
+currentConfig = API_CONFIG[globalEnv];
 
-console.log('\n========== 任务参数 ==========');
-console.log(`▶ 跟单ID: ${trackWorkId}`);
-console.log(`▶ 任务项ID: ${taskItemId}`);
-console.log(`▶ 环境: ${env === 'prod' ? '生产' : '测试'}`);
-console.log('================================\n');
+if (!trackWorkId) {
+  console.error('❌ 错误: 请提供跟单ID');
+  console.log('用法: node hangqi-workflow.js <trackWorkId> [taskItemId] [env]');
+  console.log('示例: node hangqi-workflow.js 127363772020785024 1202 prod');
+  process.exit(1);
+}
 
-const currentConfig = API_CONFIG[env] || API_CONFIG.test;
-console.log(`[INFO] 使用 API: ${currentConfig.trackBaseUrl}`);
-
-runWorkflow(trackWorkId, taskItemId, env)
+runWorkflow(trackWorkId, taskItemId, globalEnv)
   .then(result => {
     console.log('\n========== 执行结果 ==========');
     console.log(JSON.stringify(result, null, 2));
