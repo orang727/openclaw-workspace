@@ -1,0 +1,1060 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>挂起工单AI智能跟单</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: #f5f7fa;
+            color: #333;
+        }
+        .container {
+            max-width: 100%;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        h1 {
+            font-size: 24px;
+            margin-bottom: 20px;
+            color: #1a1a1a;
+        }
+        .section {
+            background: #fff;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+        }
+        .section-title {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 16px;
+            color: #2c3e50;
+        }
+        
+        /* 数据监控样式 */
+        .date-picker {
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .date-picker label {
+            font-weight: 500;
+        }
+        .date-picker input {
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 250px);
+            gap: 20px;
+            justify-content: center;
+        }
+        .stat-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 12px;
+            padding: 24px;
+            color: #fff;
+            text-align: center;
+        }
+        .stat-card.warning {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+        }
+        .stat-card.info {
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+        }
+        .stat-card.success {
+            background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);
+        }
+        .stat-value {
+            font-size: 32px;
+            font-weight: bold;
+            margin-bottom: 8px;
+        }
+        .stat-label {
+            font-size: 14px;
+            opacity: 0.9;
+        }
+        
+        /* 导航标签 */
+        .nav-tabs {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 20px;
+            border-bottom: 2px solid #eee;
+            padding-bottom: 0;
+        }
+        .nav-tab {
+            padding: 12px 24px;
+            cursor: pointer;
+            border: none;
+            background: none;
+            font-size: 14px;
+            color: #666;
+            position: relative;
+            transition: all 0.3s;
+        }
+        .nav-tab:hover {
+            color: #667eea;
+        }
+        .nav-tab.active {
+            color: #667eea;
+            font-weight: 600;
+        }
+        .nav-tab.active::after {
+            content: '';
+            position: absolute;
+            bottom: -2px;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: #667eea;
+        }
+        
+        /* 筛选和工具栏 */
+        .toolbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        .filters {
+            display: flex;
+            gap: 8px;
+        }
+        .filter-btn {
+            padding: 8px 16px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background: #fff;
+            cursor: pointer;
+            font-size: 13px;
+            transition: all 0.2s;
+        }
+        .filter-btn:hover {
+            border-color: #667eea;
+            color: #667eea;
+        }
+        .filter-btn.active {
+            background: #667eea;
+            border-color: #667eea;
+            color: #fff;
+        }
+        .mode-toggle {
+            display: flex;
+            gap: 8px;
+        }
+        .mode-btn {
+            padding: 8px 16px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background: #fff;
+            cursor: pointer;
+            font-size: 13px;
+        }
+        .mode-btn.active {
+            background: #667eea;
+            border-color: #667eea;
+            color: #fff;
+        }
+        
+        /* 列表和日志布局 */
+        .content-area {
+            display: grid;
+            grid-template-columns: 1fr 400px;
+            gap: 20px;
+            min-height: 500px;
+        }
+        
+        /* 任务列表 */
+        .task-list {
+            border: 1px solid #eee;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        .task-header {
+            display: grid;
+            grid-template-columns: 1.8fr 0.7fr 0.5fr 0.9fr 1fr 0.5fr 0.5fr 0.9fr 1.3fr 0.8fr 70px;
+            padding: 12px 16px;
+            background: #f8f9fa;
+            font-weight: 600;
+            font-size: 12px;
+            color: #666;
+            border-bottom: 1px solid #eee;
+        }
+        .task-header span:last-child {
+            text-align: left;
+        }
+        .task-item {
+            display: grid;
+            grid-template-columns: 1.8fr 0.7fr 0.5fr 0.9fr 1fr 0.5fr 0.5fr 0.9fr 1.3fr 0.8fr 70px;
+            padding: 12px 16px;
+            border-bottom: 1px solid #f0f0f0;
+            font-size: 12px;
+            align-items: center;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .task-item > div:last-child {
+            justify-content: flex-start;
+        }
+        .task-item:hover {
+            background: #f8f9ff;
+        }
+        .task-item.selected {
+            background: #eef2ff;
+        }
+        .task-name {
+            font-weight: 500;
+            color: #333;
+        }
+        .task-id {
+            color: #888;
+            font-family: monospace;
+        }
+        .task-time {
+            color: #888;
+        }
+        .status-badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+        .status-pending {
+            background: #fef3c7;
+            color: #d97706;
+        }
+        .status-processing {
+            background: #dbeafe;
+            color: #2563eb;
+        }
+        .status-completed {
+            background: #d1fae5;
+            color: #059669;
+        }
+        .status-manual {
+            background: #fce7f3;
+            color: #db2777;
+        }
+        .status-error {
+            background: #fee2e2;
+            color: #dc2626;
+        }
+        .action-btn {
+            padding: 6px 12px;
+            background: #667eea;
+            color: #fff;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        .action-btn:hover {
+            background: #5568d3;
+        }
+        .action-btn.disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        
+        /* 日志面板 */
+        .log-panel {
+            border: 1px solid #eee;
+            border-radius: 8px;
+            display: flex;
+            flex-direction: column;
+            height: 500px;
+        }
+        .log-header {
+            padding: 12px 16px;
+            background: #f8f9fa;
+            font-weight: 600;
+            font-size: 14px;
+            border-bottom: 1px solid #eee;
+        }
+        .log-content {
+            flex: 1;
+            padding: 12px;
+            overflow-y: auto;
+            font-family: 'Monaco', 'Consolas', monospace;
+            font-size: 12px;
+            line-height: 1.6;
+            background: #1e1e1e;
+            color: #d4d4d4;
+        }
+        .log-entry {
+            margin-bottom: 8px;
+            padding: 4px 8px;
+            border-radius: 4px;
+            background: #2d2d2d;
+        }
+        .log-time {
+            color: #858585;
+            margin-right: 8px;
+        }
+        .log-info {
+            color: #4ec9b0;
+        }
+        .log-warn {
+            color: #dcdcaa;
+        }
+        .log-error {
+            color: #f14c4c;
+        }
+        
+        /* 详情页 */
+        .detail-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #fff;
+            padding: 24px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        .detail-header h2 {
+            font-size: 20px;
+            margin-bottom: 16px;
+        }
+        .detail-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 16px;
+        }
+        .detail-item {
+            background: rgba(255,255,255,0.15);
+            padding: 12px 16px;
+            border-radius: 6px;
+        }
+        .detail-label {
+            font-size: 12px;
+            opacity: 0.8;
+            margin-bottom: 4px;
+        }
+        .detail-value {
+            font-size: 16px;
+            font-weight: 500;
+        }
+        
+        .detail-logs {
+            background: #fff;
+            border: 1px solid #eee;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        .detail-logs-header {
+            padding: 12px 16px;
+            background: #f8f9fa;
+            font-weight: 600;
+            font-size: 14px;
+            border-bottom: 1px solid #eee;
+        }
+        .detail-log-content {
+            padding: 16px;
+            max-height: 400px;
+            overflow-y: auto;
+            font-family: 'Monaco', 'Consolas', monospace;
+            font-size: 13px;
+            line-height: 1.8;
+            background: #1e1e1e;
+            color: #d4d4d4;
+        }
+        
+        .back-btn {
+            display: inline-block;
+            padding: 10px 20px;
+            background: #fff;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-bottom: 20px;
+            font-size: 14px;
+        }
+        .back-btn:hover {
+            background: #f5f5f5;
+        }
+        
+        /* 页面显示控制 */
+        .page-section {
+            display: none;
+        }
+        .page-section.active {
+            display: block;
+        }
+        
+        /* 空状态 */
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #999;
+        }
+        .empty-state-icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>挂起工单AI智能跟单</h1>
+        
+        <!-- 导航标签 -->
+        <div class="nav-tabs">
+            <button class="nav-tab active" onclick="showPage('monitor')">数据监控</button>
+            <button class="nav-tab" onclick="showPage('list')">跟单列表</button>
+            <button class="nav-tab" onclick="showPage('sync')">数据同步</button>
+        </div>
+        
+        <!-- 数据监控页面 -->
+        <div id="page-monitor" class="page-section active">
+            <div class="section">
+                <div class="date-picker">
+                    <label>选择日期：</label>
+                    <input type="date" id="monitor-date" value="2026-03-25" onchange="updateMonitorData()">
+                </div>
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-value" id="stat-processed">0</div>
+                        <div class="stat-label">今日处理单量</div>
+                    </div>
+                    <div class="stat-card info">
+                        <div class="stat-value" id="stat-processing">0</div>
+                        <div class="stat-label">处理中</div>
+                    </div>
+                    <div class="stat-card warning">
+                        <div class="stat-value" id="stat-error">0%</div>
+                        <div class="stat-label">异常率</div>
+                    </div>
+                    <div class="stat-card success">
+                        <div class="stat-value" id="stat-manual">0%</div>
+                        <div class="stat-label">转人工率</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 列表页面 -->
+        <div id="page-list" class="page-section">
+            <div class="section">
+                <div class="toolbar" style="flex-direction: column; align-items: stretch;">
+                    <!-- 搜索条件区域 -->
+                    <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 15px;">
+                        <div class="date-picker" style="margin-bottom: 0;">
+                            <label>发起日期：</label>
+                            <input type="date" id="list-date" value="2026-03-25" style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <label>跟单内容：</label>
+                            <select id="task-type-search" style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; min-width: 120px;">
+                                <option value="申请挂起">申请挂起</option>
+                                <option value="">全部</option>
+                            </select>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <label>城市：</label>
+                            <select id="city-search" disabled style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; min-width: 120px; background: #f5f5f5; cursor: not-allowed;">
+                                <option value="360100">南昌</option>
+                            </select>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <label>任务ID：</label>
+                            <input type="text" id="task-id-search" placeholder="输入任务ID查询" style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; width: 180px;">
+                        </div>
+                        <button class="action-btn" onclick="renderTaskList()" style="padding: 8px 20px; font-size: 14px;">搜索</button>
+                    </div>
+                    <!-- 状态筛选和模式切换 -->
+                    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+                        <div class="filters">
+                            <button class="filter-btn active" onclick="filterTasks('all', this)">全部</button>
+                            <button class="filter-btn" onclick="filterTasks('pending', this)">待处理</button>
+                            <button class="filter-btn" onclick="filterTasks('processing', this)">处理中</button>
+                            <button class="filter-btn" onclick="filterTasks('completed', this)">已完成</button>
+                            <button class="filter-btn" onclick="filterTasks('manual', this)">转人工</button>
+                            <button class="filter-btn" onclick="filterTasks('error', this)">异常</button>
+                        </div>
+                        <div class="mode-toggle">
+                            <button class="mode-btn" id="btn-auto" onclick="confirmAutoMode()">自动执行</button>
+                            <button class="mode-btn active" id="btn-manual" onclick="setMode('manual')">手动执行</button>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="content-area">
+                    <div class="task-list">
+                        <div class="task-header">
+                            <span>跟单ID</span>
+                            <span>跟单内容</span>
+                            <span>城市</span>
+                            <span>发起时间</span>
+                            <span>意向内容</span>
+                            <span>状态</span>
+                            <span>执行</span>
+                            <span>执行动作</span>
+                            <span>执行结果</span>
+                            <span>完成时间</span>
+                            <span>操作</span>
+                        </div>
+                        <div id="task-list-content">
+                            <!-- 任务列表将通过JS渲染 -->
+                        </div>
+                    </div>
+                    
+                    <div class="log-panel">
+                        <div class="log-header">实时执行日志</div>
+                        <div class="log-content" id="log-content">
+                            <!-- 日志内容将通过JS渲染 -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 数据同步页面 -->
+        <div id="page-sync" class="page-section">
+            <div class="section">
+                <div class="section-title">获取系统数据同步</div>
+                <div style="display: flex; gap: 20px; flex-wrap: wrap; align-items: flex-end;">
+                    <div style="display: flex; flex-direction: column; gap: 8px;">
+                        <label style="font-weight: 500;">数据环境</label>
+                        <select id="sync-env" onchange="onEnvChange()" style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; width: 120px;">
+                            <option value="test">测试环境</option>
+                            <option value="prod">生产环境</option>
+                        </select>
+                    </div>
+                    <div style="display: flex; flex-direction: column; gap: 8px;">
+                        <label style="font-weight: 500;">城市</label>
+                        <select id="sync-city" disabled style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; width: 120px; background: #f5f5f5; cursor: not-allowed;">
+                            <option value="360100">南昌</option>
+                        </select>
+                    </div>
+                    <div style="display: flex; flex-direction: column; gap: 8px;">
+                        <label style="font-weight: 500;">跟单内容ID *</label>
+                        <input type="text" id="sync-content-id" value="1191" style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; width: 120px;">
+                    </div>
+                    <div style="display: flex; flex-direction: column; gap: 8px;">
+                        <label style="font-weight: 500;">跟单状态</label>
+                        <input type="text" id="sync-status" value="1" style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; width: 120px;">
+                    </div>
+                    <div style="display: flex; flex-direction: column; gap: 8px;">
+                        <label style="font-weight: 500;">工单号</label>
+                        <input type="text" id="sync-work-id" placeholder="可选" style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; width: 120px;">
+                    </div>
+                    <div style="display: flex; flex-direction: column; gap: 8px;">
+                        <label style="font-weight: 500;">跟单类型</label>
+                        <input type="text" id="sync-track-type" placeholder="可选，如1108,1107" style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; width: 150px;">
+                    </div>
+                    <div style="display: flex; flex-direction: column; gap: 8px;">
+                        <label style="font-weight: 500;">跟单等级</label>
+                        <input type="text" id="sync-track-level" placeholder="可选，如1,2" style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; width: 120px;">
+                    </div>
+                    <div style="display: flex; flex-direction: column; gap: 8px;">
+                        <label style="font-weight: 500;">开始时间 *</label>
+                        <input type="datetime-local" id="sync-start-time" style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+                    </div>
+                    <div style="display: flex; flex-direction: column; gap: 8px;">
+                        <label style="font-weight: 500;">结束时间 *</label>
+                        <input type="datetime-local" id="sync-end-time" style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+                    </div>
+                    <div style="display: flex; flex-direction: column; gap: 8px;">
+                        <label style="font-weight: 500;">每页条数</label>
+                        <input type="number" id="sync-page-size" value="10" style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; width: 80px;">
+                    </div>
+                    <button class="action-btn" onclick="queryData()" style="padding: 10px 30px; font-size: 14px; margin-bottom: 8px;">查询</button>
+                    <button class="action-btn" onclick="doSyncData()" id="btn-sync" disabled style="padding: 10px 30px; font-size: 14px; margin-bottom: 8px; background: #ccc; cursor: not-allowed;">同步</button>
+                </div>
+                <div id="sync-result" style="margin-top: 20px; padding: 16px; border: 1px solid #eee; border-radius: 8px; display: none;">
+                    <div id="sync-result-content"></div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 详情页面 -->
+        <div id="page-detail" class="page-section">
+            <button class="back-btn" onclick="showPage('list')">← 返回列表</button>
+            
+            <div class="section">
+                <div class="detail-header">
+                    <h2>任务智能跟单详情</h2>
+                    <div class="detail-grid">
+                        <div class="detail-item">
+                            <div class="detail-label">跟单ID</div>
+                            <div class="detail-value" id="detail-id">-</div>
+                        </div>
+                        <div class="detail-item">
+                            <div class="detail-label">任务名称</div>
+                            <div class="detail-value" id="detail-name">-</div>
+                        </div>
+                        <div class="detail-item">
+                            <div class="detail-label">任务ID</div>
+                            <div class="detail-value" id="detail-task-id">-</div>
+                        </div>
+                        <div class="detail-item">
+                            <div class="detail-label">任务创建时间</div>
+                            <div class="detail-value" id="detail-create-time">-</div>
+                        </div>
+                        <div class="detail-item">
+                            <div class="detail-label">任务状态</div>
+                            <div class="detail-value" id="detail-status">-</div>
+                        </div>
+                        <div class="detail-item">
+                            <div class="detail-label">执行状态</div>
+                            <div class="detail-value" id="detail-exec-status">-</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="detail-logs">
+                    <div class="detail-logs-header">完整执行日志</div>
+                    <div class="detail-log-content" id="detail-log-content">
+                        <!-- 完整日志将通过JS渲染 -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // API 基础地址
+        const API_BASE = 'http://localhost:3001/api';
+        
+        // 数据
+        let tasks = [];
+        let currentLogs = [];
+        let currentFilter = 'all';
+        let currentMode = 'manual';
+        let selectedTaskId = null;
+        
+        // 确认切换到自动执行的弹窗
+        function confirmAutoMode() {
+            if (currentMode === 'auto') return;
+            if (confirm('确定要切换到自动执行模式吗？自动执行将自动处理所有挂起工单。')) {
+                setMode('auto');
+            }
+        }
+        
+        // 页面切换
+        function showPage(page) {
+            document.querySelectorAll('.page-section').forEach(s => s.classList.remove('active'));
+            document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+            
+            document.getElementById('page-' + page).classList.add('active');
+            
+            const tabIndex = page === 'monitor' ? 0 : page === 'list' ? 1 : page === 'sync' ? 2 : 0;
+            document.querySelectorAll('.nav-tab')[tabIndex].classList.add('active');
+            
+            if (page === 'list') {
+                renderTaskList();
+                updateLogPanel('点击左侧任务查看日志');
+            } else if (page === 'detail' && selectedTaskId) {
+                showTaskDetail(selectedTaskId);
+            }
+        }
+        
+        // 从 API 获取监控数据
+        async function updateMonitorData() {
+            const date = document.getElementById('monitor-date').value;
+            try {
+                const res = await fetch(`${API_BASE}/stats?date=${date}`);
+                const result = await res.json();
+                if (result.code === 0 && result.data) {
+                    document.getElementById('stat-processed').textContent = result.data.processed_count || 0;
+                    document.getElementById('stat-processing').textContent = result.data.processing_count || 0;
+                    document.getElementById('stat-error').textContent = (result.data.error_rate || 0) + '%';
+                    document.getElementById('stat-manual').textContent = (result.data.manual_rate || 0) + '%';
+                }
+            } catch (err) {
+                console.error('获取监控数据失败:', err);
+            }
+        }
+        
+        // 从 API 获取任务列表
+        async function fetchTasks() {
+            const dateFilter = document.getElementById('list-date').value;
+            const taskTypeFilter = document.getElementById('task-type-search').value;
+            const cityFilter = document.getElementById('city-search').value;
+            const taskIdSearch = document.getElementById('task-id-search').value.trim();
+            
+            let url = `${API_BASE}/tasks?`;
+            if (dateFilter) url += `date=${dateFilter}&`;
+            if (taskTypeFilter) url += `taskType=${encodeURIComponent(taskTypeFilter)}&`;
+            if (cityFilter) url += `city=${encodeURIComponent(cityFilter)}&`;
+            if (taskIdSearch) url += `taskId=${taskIdSearch}&`;
+            if (currentFilter !== 'all') url += `status=${currentFilter}&`;
+            
+            try {
+                const res = await fetch(url);
+                const result = await res.json();
+                if (result.code === 0) {
+                    tasks = result.data;
+                }
+            } catch (err) {
+                console.error('获取任务列表失败:', err);
+                tasks = [];
+            }
+        }
+        
+        // 从 API 获取任务日志
+        async function fetchTaskLogs(taskId) {
+            try {
+                const res = await fetch(`${API_BASE}/task/${taskId}`);
+                const result = await res.json();
+                if (result.code === 0) {
+                    currentLogs = result.data.logs || [];
+                    return result.data.logs.map(l => l.log_content).join('\n');
+                }
+            } catch (err) {
+                console.error('获取日志失败:', err);
+            }
+            return '';
+        }
+        
+        // 筛选任务
+        function filterTasks(filter, btn) {
+            currentFilter = filter;
+            document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            renderTaskList();
+        }
+        
+        // 设置执行模式
+        function setMode(mode) {
+            currentMode = mode;
+            document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+            if (mode === 'auto') {
+                document.getElementById('btn-auto').classList.add('active');
+                document.getElementById('btn-manual').classList.remove('active');
+            } else {
+                document.getElementById('btn-manual').classList.add('active');
+                document.getElementById('btn-auto').classList.remove('active');
+            }
+        }
+        
+        // 渲染任务列表
+        async function renderTaskList() {
+            const container = document.getElementById('task-list-content');
+            container.innerHTML = '<div class="empty-state"><div class="empty-state-icon">⏳</div><div>加载中...</div></div>';
+            
+            await fetchTasks();
+            
+            if (tasks.length === 0) {
+                container.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📋</div><div>暂无数据</div></div>';
+                return;
+            }
+            
+            container.innerHTML = tasks.map(task => `
+                <div class="task-item ${selectedTaskId === task.track_id ? 'selected' : ''}" onclick="selectTask('${task.track_id}')">
+                    <div class="task-id">${task.track_id}</div>
+                    <div class="task-type">${task.task_type || '申请挂起'}</div>
+                    <div class="task-city">${task.city || '—'}</div>
+                    <div class="task-time">${task.create_time}</div>
+                    <div class="task-intent">${task.intent_content || '—'}</div>
+                    <div><span class="status-badge status-${task.status}">${getStatusText(task.status)}</span></div>
+                    <div>${task.exec_status}</div>
+                    <div class="task-action">${task.exec_action || '—'}</div>
+                    <div class="task-result" title="${task.exec_result || ''}">${task.exec_result ? (task.exec_result.length > 25 ? task.exec_result.substring(0, 25) + '...' : task.exec_result) : '—'}</div>
+                    <div class="task-complete-time">${task.complete_time || '—'}</div>
+                    <div style="display: flex; gap: 4px; justify-content: flex-start;">
+                        ${task.status === 'pending' ? '<button class="action-btn" onclick="event.stopPropagation(); executeTask(\'' + task.track_id + '\')">执行</button>' : ''}
+                        ${task.status === 'processing' ? '<button class="action-btn" onclick="event.stopPropagation(); executeTask(\'' + task.track_id + '\')">重试</button>' : ''}
+                        ${task.status === 'completed' ? '<button class="action-btn disabled" disabled>完成</button>' : ''}
+                        ${task.status === 'error' ? '<button class="action-btn" onclick="event.stopPropagation(); executeTask(\'' + task.track_id + '\')">重试</button>' : ''}
+                        <button class="action-btn" onclick="event.stopPropagation(); viewDetail('${task.track_id}')">详情</button>
+                    </div>
+                </div>
+            `).join('');
+            
+            // 默认选中第一个
+            if (tasks.length > 0 && !selectedTaskId) {
+                await selectTask(tasks[0].track_id);
+            }
+        }
+        
+        // 获取状态文本
+        function getStatusText(status) {
+            const map = {
+                'pending': '待处理',
+                'processing': '处理中',
+                'completed': '已完成',
+                'manual': '转人工',
+                'error': '异常'
+            };
+            return map[status] || status;
+        }
+        
+        // 选择任务
+        async function selectTask(taskId) {
+            selectedTaskId = taskId;
+            await renderTaskList();
+            const logs = await fetchTaskLogs(taskId);
+            updateLogPanel(logs);
+        }
+        
+        // 更新日志面板
+        function updateLogPanel(logs) {
+            const container = document.getElementById('log-content');
+            if (!logs) {
+                logs = '暂无日志';
+            }
+            const lines = logs.split('\n').map(line => {
+                let cls = 'log-info';
+                if (line.includes('[WARN]')) cls = 'log-warn';
+                if (line.includes('[ERROR]')) cls = 'log-error';
+                return `<div class="log-entry"><span class="log-time">${line.split(' ')[0] || ''}</span><span class="${cls}">${line}</span></div>`;
+            }).join('');
+            container.innerHTML = lines;
+        }
+        
+        // 查看详情
+        async function viewDetail(taskId) {
+            selectedTaskId = taskId;
+            showPage('detail');
+        }
+        
+        // 执行任务
+        async function executeTask(taskId) {
+            if (!confirm('确定要立即执行该任务吗？')) return;
+
+            try {
+                // 先更新状态为处理中
+                const res = await fetch(`${API_BASE}/execute`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ trackId: taskId })
+                });
+                const result = await res.json();
+                if (result.code === 0) {
+                    alert('任务执行完成');
+                } else {
+                    alert('执行失败: ' + result.message);
+                }
+                await renderTaskList();
+                // 执行完成后刷新日志
+                await selectTask(taskId);
+            } catch (err) {
+                console.error('执行任务失败:', err);
+                alert('执行失败: ' + err.message);
+            }
+        }
+        
+        // 暂存查询结果
+        let queryResultData = [];
+        
+        // 环境切换时更新跟单内容ID
+        function onEnvChange() {
+            const env = document.getElementById('sync-env').value;
+            const contentIdInput = document.getElementById('sync-content-id');
+            // 测试环境默认1191，生产环境默认可能不同，这里保持1191
+            contentIdInput.value = '1191';
+        }
+        
+        // 查询数据
+        async function queryData() {
+            const env = document.getElementById('sync-env').value;
+            const city = document.getElementById('sync-city').value;
+            const contentId = document.getElementById('sync-content-id').value;
+            const status = document.getElementById('sync-status').value;
+            const workId = document.getElementById('sync-work-id').value;
+            const trackType = document.getElementById('sync-track-type').value;
+            const trackLevel = document.getElementById('sync-track-level').value;
+            const startTime = document.getElementById('sync-start-time').value;
+            const endTime = document.getElementById('sync-end-time').value;
+            const pageSize = document.getElementById('sync-page-size').value;
+            
+            if (!contentId) {
+                alert('请输入跟单内容ID');
+                return;
+            }
+            if (!startTime || !endTime) {
+                alert('请选择开始时间和结束时间');
+                return;
+            }
+            
+            const resultDiv = document.getElementById('sync-result');
+            const resultContent = document.getElementById('sync-result-content');
+            resultDiv.style.display = 'block';
+            resultContent.innerHTML = '<div style="color: #666;">正在查询...</div>';
+            
+            try {
+                const res = await fetch(`${API_BASE}/query`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        env: env,
+                        cityId: city,
+                        trackContentIdList: contentId.split(',').map(s => parseInt(s.trim())),
+                        trackStatusListStr: status,
+                        code: workId ? parseInt(workId) : null,
+                        trackTypeList: trackType ? trackType.split(',').map(s => parseInt(s.trim())) : null,
+                        trackLevelList: trackLevel ? trackLevel.split(',').map(s => parseInt(s.trim())) : null,
+                        startTime: startTime,
+                        endTime: endTime,
+                        pageSize: parseInt(pageSize) || 10,
+                        pageIndex: 1
+                    })
+                });
+                
+                // 检查响应状态
+                if (!res.ok) {
+                    resultContent.innerHTML = '<div style="color: red;">❌ 查询失败：服务器错误 ' + res.status + '</div>';
+                    return;
+                }
+                
+                const text = await res.text();
+                if (!text || text.trim() === '') {
+                    resultContent.innerHTML = '<div style="color: red;">❌ 查询失败：服务器返回空响应</div>';
+                    return;
+                }
+                
+                let result;
+                try {
+                    result = JSON.parse(text);
+                } catch (e) {
+                    resultContent.innerHTML = '<div style="color: red;">❌ 查询失败：解析响应失败 - ' + e.message + '<br>原始响应：' + text.substring(0, 200) + '</div>';
+                    return;
+                }
+                
+                if (result.code === 0) {
+                    queryResultData = result.data ? (result.data.items || []) : [];
+                    const btnSync = document.getElementById('btn-sync');
+                    if (queryResultData.length > 0) {
+                        btnSync.disabled = false;
+                        btnSync.style.background = '#28a745';
+                        btnSync.style.cursor = 'pointer';
+                    }
+                    resultContent.innerHTML = `
+                        <div style="margin-bottom: 15px;">✅ 查询成功！共 ${result.data.total} 条数据，请确认后点击"同步"按钮</div>
+                        <div style="max-height: 300px; overflow-y: auto;">
+                            <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+                                <tr style="background: #f5f5f5;">
+                                    <th style="padding: 8px; border: 1px solid #ddd;">跟单ID</th>
+                                    <th style="padding: 8px; border: 1px solid #ddd;">跟单内容</th>
+                                    <th style="padding: 8px; border: 1px solid #ddd;">状态</th>
+                                    <th style="padding: 8px; border: 1px solid #ddd;">发起时间</th>
+                                </tr>
+                                ${queryResultData.slice(0, 20).map(item => `
+                                    <tr>
+                                        <td style="padding: 8px; border: 1px solid #ddd;">${item.trackWorkId || '-'}</td>
+                                        <td style="padding: 8px; border: 1px solid #ddd;">${item.trackContent || '-'}</td>
+                                        <td style="padding: 8px; border: 1px solid #ddd;">${item.statusName || '-'}</td>
+                                        <td style="padding: 8px; border: 1px solid #ddd;">${item.createTime || '-'}</td>
+                                    </tr>
+                                `).join('')}
+                                ${queryResultData.length > 20 ? `<tr><td colspan="4" style="padding: 8px; text-align: center; color: #666;">...还有 ${queryResultData.length - 20} 条未显示</td></tr>` : ''}
+                            </table>
+                        </div>
+                    `;
+                } else {
+                    resultContent.innerHTML = `<div style="color: red;">❌ 查询失败：${result.message}</div>`;
+                }
+            } catch (err) {
+                console.error('查询失败:', err);
+                resultContent.innerHTML = `<div style="color: red;">❌ 查询失败：${err.message}</div>`;
+            }
+        }
+        
+        // 同步数据
+        async function doSyncData() {
+            if (queryResultData.length === 0) {
+                alert('请先查询数据');
+                return;
+            }
+            
+            const resultDiv = document.getElementById('sync-result');
+            const resultContent = document.getElementById('sync-result-content');
+            resultContent.innerHTML = '<div style="color: #666;">正在同步...</div>';
+            
+            try {
+                const city = document.getElementById('sync-city').value;
+                const contentId = document.getElementById('sync-content-id').value;
+                
+                const res = await fetch(`${API_BASE}/sync`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        data: queryResultData,
+                        cityId: city,
+                        trackContentIdList: contentId.split(',').map(s => parseInt(s.trim()))
+                    })
+                });
+                const result = await res.json();
+                if (result.code === 0) {
+                    resultContent.innerHTML = `<div style="color: green;">✅ 同步成功！共同步 ${result.data.count} 条数据</div>`;
+                    queryResultData = [];
+                    // 刷新列表
+                    renderTaskList();
+                } else {
+                    resultContent.innerHTML = `<div style="color: red;">❌ 同步失败：${result.message}</div>`;
+                }
+            } catch (err) {
+                console.error('同步失败:', err);
+                resultContent.innerHTML = `<div style="color: red;">❌ 同步失败：${err.message}</div>`;
+            }
+        }
+        
+        // 显示任务详情
+        async function showTaskDetail(taskId) {
+            const task = tasks.find(t => t.track_id === taskId);
+            if (!task) {
+                await fetchTasks();
+            }
+            
+            const taskData = tasks.find(t => t.track_id === taskId);
+            if (!taskData) return;
+            
+            document.getElementById('detail-id').textContent = taskData.track_id;
+            document.getElementById('detail-name').textContent = taskData.task_name;
+            document.getElementById('detail-task-id').textContent = taskData.task_id;
+            document.getElementById('detail-create-time').textContent = taskData.create_time;
+            document.getElementById('detail-status').textContent = getStatusText(taskData.status);
+            document.getElementById('detail-exec-status').textContent = taskData.exec_status;
+            
+            // 获取完整日志
+            const logs = await fetchTaskLogs(taskId);
+            const logContainer = document.getElementById('detail-log-content');
+            const lines = logs.split('\n').map(line => {
+                let cls = 'log-info';
+                if (line.includes('[WARN]')) cls = 'log-warn';
+                if (line.includes('[ERROR]')) cls = 'log-error';
+                return `<div>${line}</div>`;
+            }).join('');
+            logContainer.innerHTML = lines;
+        }
+        
+        // 初始化
+        updateMonitorData();
+        renderTaskList();
+        loadCities();
+        
+        // 加载城市列表
+        async function loadCities() {
+            try {
+                const res = await fetch(`${API_BASE}/cities`);
+                const result = await res.json();
+                if (result.code === 0) {
+                    const select = document.getElementById('sync-city');
+                    select.innerHTML = result.data.map(c => 
+                        `<option value="${c.city_id}">${c.city_name}</option>`
+                    ).join('');
+                    // 默认选中南昌
+                    select.value = '360100';
+                }
+            } catch (err) {
+                console.error('加载城市列表失败:', err);
+            }
+        }
+    </script>
+</body>
+</html>

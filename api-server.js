@@ -453,20 +453,26 @@ async function callWorkflowServer(trackId, task) {
                         });
                     }
                     // 保存步骤结果
+                    let lastStepName = '';
                     if (result.steps) {
                         result.steps.forEach(step => {
                             const stepLog = `Step ${step.step}: ${step.name} [${step.status}]`;
                             db.insertLog(trackId, stepLog, step.status === 'failed' ? 'error' : 'info');
+                            lastStepName = step.name;
                         });
                     }
 
+                    // 获取最后一条日志作为执行结果
+                    const logs = db.getTaskLogs(trackId);
+                    const lastLog = logs.length > 0 ? logs[logs.length - 1].log_content : '';
+
                     if (result.success) {
                         db.insertLog(trackId, `[${formatDate(new Date())}] 执行成功: ${result.intent || '完成'}`, 'info');
-                        db.updateTaskStatus(trackId, 'completed', '已完成');
+                        db.updateTaskStatus(trackId, 'completed', '已完成', lastStepName, lastLog, result.intent || '');
                         resolve(result);
                     } else {
                         db.insertLog(trackId, `[${formatDate(new Date())}] 执行失败: ${result.fail_reason || '未知错误'}`, 'error');
-                        db.updateTaskStatus(trackId, 'error', '执行失败');
+                        db.updateTaskStatus(trackId, 'error', '执行失败', lastStepName, lastLog, result.intent || '');
                         reject(new Error(result.fail_reason || '执行失败'));
                     }
                 } catch (e) {
@@ -479,7 +485,7 @@ async function callWorkflowServer(trackId, task) {
         req.on('error', (e) => {
             console.error('工作流请求失败:', e);
             db.insertLog(trackId, `[${formatDate(new Date())}] 连接失败: ${e.message}`, 'error');
-            db.updateTaskStatus(trackId, 'error', '连接失败');
+            db.updateTaskStatus(trackId, 'error', '连接失败', '', `连接失败: ${e.message}`);
             reject(e);
         });
 
