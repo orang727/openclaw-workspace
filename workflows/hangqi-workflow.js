@@ -412,47 +412,47 @@ async function skill2_recognizeIntent(audioText, detectRecordId = null, recordin
   }
 }
 
-// // Skill 3: 跟单处理
-// async function skill3_handleTrack(workId, trackWorkId, intentName) {
-//   addLog('PROCESS', 'Skill3: 跟单处理', { workId, trackWorkId, intentName });
+// Skill 3: 跟单处理
+async function skill3_handleTrack(workId, trackWorkId, intentName) {
+  addLog('PROCESS', 'Skill3: 跟单处理', { workId, trackWorkId, intentName });
   
-//   const authConfig = await loadAuthConfig('handle-track-work');
-//   if (!authConfig) throw new Error('认证配置加载失败');
+  const authConfig = await loadAuthConfig('handle-track-work');
+  if (!authConfig) throw new Error('认证配置加载失败');
 
-//   const body = {
-//     workId,
-//     trackWorkId,
-//     trackContentId: 1191,
-//     handleOptionList: [{
-//       optionId: 111,
-//       optionName: '挂起申请驳回',
-//       optionLevel: 0
-//     }],
-//     handleJumpType: 0,
-//     handleRemark: intentName || 'AI自动处理',
-//     isCompleteTrack: 1
-//   };
+  const body = {
+    workId,
+    trackWorkId,
+    trackContentId: 1191,
+    handleOptionList: [{
+      optionId: 111,
+      optionName: '挂起申请驳回',
+      optionLevel: 0
+    }],
+    handleJumpType: 0,
+    handleRemark: intentName || 'AI自动处理',
+    isCompleteTrack: 1
+  };
 
-//   addLog('REQUEST', '提交跟单处理', { url: `${currentConfig.trackBaseUrl}/amis/track/save/newHandle` });
+  addLog('REQUEST', '提交跟单处理', { url: `${currentConfig.trackBaseUrl}/amis/track/save/newHandle` });
 
-//   const response = await httpPost(`${currentConfig.trackBaseUrl}/amis/track/save/newHandle`,
-//     { 'Authorization': `Bearer ${authConfig.AK}` },
-//     body
-//   );
+  const response = await httpPost(`${currentConfig.trackBaseUrl}/amis/track/save/newHandle`,
+    { 'Authorization': `Bearer ${authConfig.AK}` },
+    body
+  );
 
-//   const xmlText = await response.text();
-//   addLog('RESPONSE', '跟单处理响应', { xml: xmlText.substring(0, 200) });
+  const xmlText = await response.text();
+  addLog('RESPONSE', '跟单处理响应', { xml: xmlText.substring(0, 200) });
 
-//   const status = parseXmlValue(xmlText, 'status');
-//   const msg = parseXmlValue(xmlText, 'msg');
+  const status = parseXmlValue(xmlText, 'status');
+  const msg = parseXmlValue(xmlText, 'msg');
   
-//   if (status !== '0') {
-//     throw new Error(`跟单处理失败: ${msg}`);
-//   }
+  if (status !== '0') {
+    throw new Error(`跟单处理失败: ${msg}`);
+  }
   
-//   addLog('SUCCESS', `Skill3完成: ${msg}`);
-//   return { success: true, msg };
-// }
+  addLog('SUCCESS', `Skill3完成: ${msg}`);
+  return { success: true, msg };
+}
 
 // Skill 4: 改约
 async function skill4_modifyDutyTime(trackWorkId) {
@@ -816,29 +816,44 @@ async function runWorkflow(trackWorkId, taskItemId = 1202, env = 'test') {
   }
 }
 
-// ==================== 启动 ====================
-const args = process.argv.slice(2);
-const trackWorkId = args[0];
-const taskItemId = args[1] || 1202;
-const rawEnv = args[2] || 'test';
+// ==================== 模块化支持 ====================
+// 如果被 require，则只导出函数，不执行
+if (require.main === module) {
+  // ==================== 启动 ====================
+  const args = process.argv.slice(2);
+  const trackWorkId = args[0];
+  const taskItemId = args[1] || '1202';
+  const rawEnv = args[2] || 'test';
 
-globalEnv = (rawEnv === '生产' || rawEnv === 'prod') ? 'prod' : 'test';
-currentConfig = API_CONFIG[globalEnv];
+  globalEnv = (rawEnv === '生产' || rawEnv === 'prod') ? 'prod' : 'test';
+  currentConfig = API_CONFIG[globalEnv];
 
-if (!trackWorkId) {
-  console.error('❌ 错误: 请提供跟单ID');
-  console.log('用法: node hangqi-workflow.js <trackWorkId> [taskItemId] [env]');
-  console.log('示例: node hangqi-workflow.js 127363772020785024 1202 prod');
-  process.exit(1);
-}
-
-runWorkflow(trackWorkId, taskItemId, globalEnv)
-  .then(result => {
-    console.log('\n========== 执行结果 ==========');
-    console.log(JSON.stringify(result, null, 2));
-    process.exit(result.success ? 0 : 1);
-  })
-  .catch(error => {
-    console.error('Fatal error:', error);
+  if (!trackWorkId) {
+    console.error('❌ 错误: 请提供跟单ID');
+    console.log('用法: node hangqi-workflow.js <trackWorkId> [taskItemId] [env]');
+    console.log('示例: node hangqi-workflow.js 127363772020785024 1202 prod');
     process.exit(1);
-  });
+  }
+
+  runWorkflow(trackWorkId, taskItemId, globalEnv)
+    .then(result => {
+      console.log('\n========== 执行结果 ==========');
+      console.log(JSON.stringify(result, null, 2));
+      process.exit(result.success ? 0 : 1);
+    })
+    .catch(error => {
+      console.error('Fatal error:', error);
+      process.exit(1);
+    });
+} else {
+  // 被模块化加载时，导出函数
+  module.exports = {
+    runWorkflow,
+    skill1_getRecordText,
+    skill2_recognizeIntent,
+    skill3_handleTrack,
+    skill4_modifyDutyTime,
+    skill5_cancelWork,
+    skill6_createTrackTask
+  };
+}

@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 /**
  * 挂起工作流 HTTP 服务
- * 
+ *
  * 用法:
  *   node workflow-server.js [port]
- * 
+ *
  * 示例:
  *   node workflow-server.js 3000
  */
@@ -15,6 +15,204 @@ const url = require('url');
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
+
+// ==================== 加载 hangqi-workflow ====================
+const WORKFLOW_PATH = path.join(__dirname, 'hangqi-workflow.js');
+let hangqiWorkflow = null;
+try {
+    hangqiWorkflow = require(WORKFLOW_PATH);
+    console.log('✅ hangqi-workflow.js 模块加载成功');
+} catch (e) {
+    console.error('❌ hangqi-workflow.js 模块加载失败:', e.message);
+}
+
+// ==================== 数据库集成 ====================
+const DB_PATH = path.join(__dirname, '..', 'database.db');
+let db = null;
+let dbReady = false;
+
+// 初始化数据库
+async function initDatabase() {
+    try {
+        const initSqlJs = require('sql.js');
+        const SQL = await initSqlJs();
+        
+        if (fs.existsSync(DB_PATH)) {
+            const fileBuffer = fs.readFileSync(DB_PATH);
+            db = new SQL.Database(fileBuffer);
+            console.log('✅ 数据库加载成功');
+        } else {
+            db = new SQL.Database();
+            console.log('✅ 数据库创建成功');
+        }
+        
+        // 确保表存在
+        db.run(`
+            CREATE TABLE IF NOT EXISTS tasks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                track_id TEXT NOT NULL UNIQUE,
+                track_content_id TEXT,
+                task_type TEXT DEFAULT '申请挂起',
+                city TEXT,
+                city_id TEXT,
+                create_time TEXT NOT NULL,
+                intent_content TEXT,
+                confidence TEXT,
+                status TEXT DEFAULT 'pending',
+                exec_status TEXT DEFAULT '等待中',
+                complete_time TEXT,
+                mode TEXT DEFAULT 'manual',
+                date TEXT,
+                reason_name TEXT,
+                track_type_name TEXT,
+                track_level_name TEXT,
+                work_id TEXT,
+                promoter TEXT,
+                operate_remark TEXT,
+                created_at TEXT DEFAULT (datetime('now'))
+            )
+        `);
+        
+        db.run(`
+            CREATE TABLE IF NOT EXISTS task_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                task_id TEXT NOT NULL,
+                log_content TEXT,
+                log_level TEXT DEFAULT 'INFO',
+                create_time TEXT DEFAULT (datetime('now')),
+                FOREIGN KEY (task_id) REFERENCES tasks(track_id)
+            )
+        `);
+        
+        saveDatabase();
+        dbReady = true;
+        console.log('✅ 数据库表初始化完成');
+    } catch (e) {
+        console.error('❌ 数据库初始化失败:', e.message);
+    }
+}
+
+function saveDatabase() {
+    if (!db) return;
+    try {
+        const data = db.export();
+        const buffer = Buffer.from(data);
+        fs.writeFileSync(DB_PATH, buffer);
+    } catch (e) {
+        console.error('❌ 保存数据库失败:', e.message);
+    }
+}
+
+// 更新任务状态
+function updateTaskStatus(trackId, status, execStatus) {
+    if (!db || !dbReady) return;
+    try {
+        // 先检查是否存在
+        const checkStmt = db.prepare('SELECT id FROM tasks WHERE track_id = ?');
+        checkStmt.bind([trackId]);
+        const exists = checkStmt.step();
+        checkStmt.free();
+        
+        if (exists) {
+            // 更新现有记录
+            const stmt = db.prepare(`
+                UPDATE tasks SET status = ?, exec_status = ?, complete_time = datetime('now')
+                WHERE track_id = ?
+            `);
+            stmt.run([status, execStatus, trackId]);
+            stmt.free();
+        } else {
+            // 插入新记录（使用默认值）
+            const now = new Date().toISOString().slice(0, 10);
+            const stmt = db.prepare(`
+                INSERT INTO tasks (track_id, status, exec_status, create_time, date)
+                VALUES (?, ?, ?, datetime('now'), ?)
+            `);
+            stmt.run([trackId, status, execStatus, now]);
+            stmt.free();
+        }
+        saveDatabase();
+    } catch (e) {
+        console.error('❌ 更新状态失败:', e.message);
+    }
+}
+
+// 更新任务意图内容（Skill2返回的category）
+function updateTaskIntent(trackId, intentName, intentContent, confidence) {
+    if (!db || !dbReady) return;
+    try {
+        // 先检查是否存在
+        const checkStmt = db.prepare('SELECT id FROM tasks WHERE track_id = ?');
+        checkStmt.bind([trackId]);
+        const exists = checkStmt.step();
+        checkStmt.free();
+        
+        if (exists) {
+            // 更新现有记录
+            const stmt = db.prepare(`
+                UPDATE tasks SET intent_content = ?, confidence = ?, status = 'processing', exec_status = '执行中'
+                WHERE track_id = ?
+            `);
+            stmt.run([intentContent, confidence || '', trackId]);
+            stmt.free();
+        } else {
+            // 插入新记录
+            const now = new Date().toISOString().slice(0, 10);
+            const stmt = db.prepare(`
+                INSERT INTO tasks (track_id, status, exec_status, create_time, date, intent_content, confidence)
+                VALUES (?, 'processing', '执行中', datetime('now'), ?, ?, ?)
+            `);
+            stmt.run([trackId, now, intentContent, confidence || '']);
+            stmt.free();
+        }
+        saveDatabase();
+    } catch (e) {
+        console.error('❌ 更新意图失败:', e.message);
+    }
+}
+
+// 插入日志
+function insertTaskLog(trackId, logContent, logLevel = 'INFO') {
+    if (!db || !dbReady) return;
+    try {
+        const stmt = db.prepare(`
+            INSERT INTO task_logs (task_id, log_content, log_level)
+            VALUES (?, ?, ?)
+        `);
+        stmt.run([trackId, logContent, logLevel]);
+        stmt.free();
+        // 定期保存，不用每次都保存
+    } catch (e) {
+        console.error('❌ 插入日志失败:', e.message);
+    }
+}
+
+// 保存日志到数据库
+function saveLogs() {
+    if (!db || !dbReady) return;
+    saveDatabase();
+}
+
+// 查询任务日志
+function getTaskLogs(trackId) {
+    if (!db || !dbReady) return [];
+    try {
+        const stmt = db.prepare('SELECT * FROM task_logs WHERE task_id = ? ORDER BY create_time ASC');
+        stmt.bind([trackId]);
+        const results = [];
+        while (stmt.step()) {
+            results.push(stmt.getAsObject());
+        }
+        stmt.free();
+        return results;
+    } catch (e) {
+        console.error('❌ 查询日志失败:', e.message);
+        return [];
+    }
+}
+
+// 启动时初始化数据库
+initDatabase();
 
 // ==================== 沙箱 Session 管理 ====================
 const SANDBOX = {
@@ -226,6 +424,13 @@ const CONFIG = {
 };
 
 // ==================== 工具函数 ====================
+// 当前正在执行的 trackId
+let currentTrackId = null;
+
+function setCurrentTrackId(trackId) {
+    currentTrackId = trackId;
+}
+
 function log(message, type = 'info') {
     const now = new Date().toLocaleString('zh-CN');
     const colors = {
@@ -237,6 +442,15 @@ function log(message, type = 'info') {
     };
     const reset = '\x1b[0m';
     console.log(`${colors[type]}[${now}] ${message}${reset}`);
+    
+    // 保存到数据库
+    if (currentTrackId && dbReady) {
+        try {
+            insertTaskLog(currentTrackId, `[${type.toUpperCase()}] ${message}`, type);
+        } catch (e) {
+            console.error('保存日志失败:', e.message);
+        }
+    }
 }
 
 // 简单的 XML 转 JSON 解析器
@@ -1106,27 +1320,125 @@ async function skill6_createFollowup(trackWorkId, servWorkId, intentName, intent
 }
 
 // ==================== 工作流主逻辑 ====================
-async function runWorkflow(trackWorkId) {
+// 使用 hangqi-workflow.js 的实现
+async function runWorkflow(trackWorkId, taskItemId = '1202', env = 'test') {
     log('═══════════════════════════════════════════════════════════', 'system');
-    log('🚀 挂起工作流 v9.0 开始执行', 'system');
+    log('🚀 挂起工作流 v9.0 开始执行 (hangqi-workflow)', 'system');
     log(`📋 跟单 ID: ${trackWorkId}`, 'system');
-    
+
+    // 如果 hangqi-workflow 可用，直接使用
+    if (hangqiWorkflow && hangqiWorkflow.runWorkflow) {
+        try {
+            // 设置环境
+            hangqiWorkflow.globalEnv = env;
+            hangqiWorkflow.currentConfig = hangqiWorkflow.API_CONFIG[env] || hangqiWorkflow.API_CONFIG.test;
+
+            const result = await hangqiWorkflow.runWorkflow(trackWorkId, taskItemId, env);
+
+            if (result.success) {
+                log('✅ 工作流执行成功', 'system');
+            } else {
+                log(`❌ 工作流执行失败: ${result.fail_reason || '未知错误'}`, 'error');
+            }
+
+            return result;
+        } catch (error) {
+            log(`❌ 工作流异常: ${error.message}`, 'error');
+            return {
+                success: false,
+                fail_at: 'hangqi-workflow',
+                fail_reason: error.message,
+                error: error.stack
+            };
+        }
+    }
+
+    // 如果加载失败，使用内置简化逻辑
+    log('⚠️ hangqi-workflow.js 不可用，使用简化逻辑', 'warn');
     const steps = [];
     let currentStep = 0;
-    
+
     try {
-        // Step 1: Skill1
+        // Step 1: 获取录音文本
         currentStep++;
-        steps.push({ step: currentStep, name: 'Skill1: 获取录音', status: 'running' });
+        steps.push({ step: currentStep, name: 'Skill1: 获取录音文本', status: 'running' });
         const skill1Result = await skill1_getCallRecord(trackWorkId);
-        
+
         if (!skill1Result.success) {
             steps[steps.length - 1] = { ...steps[steps.length - 1], status: 'failed', result: skill1Result };
             log(`❌ Skill1 失败：${skill1Result.fail_reason}`, 'error');
-            
-            // 执行 Skill6
+            return {
+                success: false,
+                fail_at: 'Skill1',
+                fail_reason: skill1Result.fail_reason,
+                steps
+            };
+        }
+
+        steps[steps.length - 1] = { ...steps[steps.length - 1], status: 'completed', result: skill1Result };
+
+        // Step 2: 识别意图
+        currentStep++;
+        steps.push({ step: currentStep, name: 'Skill2: 识别意图', status: 'running' });
+        const skill2Result = await skill2_analyzeIntent(trackWorkId, skill1Result.servWorkId, skill1Result.voiceText);
+
+        if (skill2Result.status === 'interrupted') {
+            steps[steps.length - 1] = { ...steps[steps.length - 1], status: 'failed', result: skill2Result };
+            log(`❌ Skill2 失败：${skill2Result.interrupt_reason}`, 'error');
+            return {
+                success: false,
+                fail_at: 'Skill2',
+                fail_reason: skill2Result.interrupt_reason,
+                steps
+            };
+        }
+
+        steps[steps.length - 1] = { ...steps[steps.length - 1], status: 'completed', result: skill2Result };
+
+        const intentName = skill2Result.intent_name;
+        log(`🎯 意图分类：${intentName}`, 'info');
+
+        // Step 3: 根据意图执行
+        if (intentName === '确认上门') {
             currentStep++;
-            steps.push({ step: currentStep, name: 'Skill6: 生成跟单（兜底）', status: 'running' });
+            steps.push({ step: currentStep, name: 'Skill4: 改约', status: 'running' });
+            const skill4Result = await skill4_modifyTime(trackWorkId, skill1Result.servWorkId);
+
+            if (!skill4Result.success) {
+                steps[steps.length - 1] = { ...steps[steps.length - 1], status: 'failed', result: skill4Result };
+                log(`❌ Skill4 失败：${skill4Result.fail_reason}`, 'error');
+            } else {
+                steps[steps.length - 1] = { ...steps[steps.length - 1], status: 'completed', result: skill4Result };
+            }
+
+            return {
+                success: skill4Result.success,
+                intent: intentName,
+                steps,
+                final_result: skill4Result
+            };
+        } else if (intentName === '取消') {
+            currentStep++;
+            steps.push({ step: currentStep, name: 'Skill5: 取消工单', status: 'running' });
+            const skill5Result = await skill5_cancelWork(trackWorkId, skill1Result.servWorkId);
+
+            if (!skill5Result.success) {
+                steps[steps.length - 1] = { ...steps[steps.length - 1], status: 'failed', result: skill5Result };
+                log(`❌ Skill5 失败：${skill5Result.fail_reason}`, 'error');
+            } else {
+                steps[steps.length - 1] = { ...steps[steps.length - 1], status: 'completed', result: skill5Result };
+            }
+
+            return {
+                success: skill5Result.success,
+                intent: intentName,
+                steps,
+                final_result: skill5Result
+            };
+        } else {
+            // 其他意图 - 创建跟单任务
+            currentStep++;
+            steps.push({ step: currentStep, name: 'Skill6: 生成跟单', status: 'running' });
             const skill6Result = await skill6_createFollowup(trackWorkId, skill1Result.servWorkId, '', '', '挂起跟单');
 
             if (!skill6Result.success) {
@@ -1135,136 +1447,15 @@ async function runWorkflow(trackWorkId) {
             } else {
                 steps[steps.length - 1] = { ...steps[steps.length - 1], status: 'completed', result: skill6Result };
             }
-            
-            return {
-                success: false,
-                fail_at: 'Skill1',
-                fail_reason: skill1Result.fail_reason,
-                steps,
-                final_result: skill6Result
-            };
-        }
-        
-        steps[steps.length - 1] = { ...steps[steps.length - 1], status: 'completed', result: skill1Result };
-        
-        // Step 2: Skill2
-        currentStep++;
-        steps.push({ step: currentStep, name: 'Skill2: 识别意图', status: 'running' });
-        const skill2Result = await skill2_analyzeIntent(trackWorkId, skill1Result.servWorkId, skill1Result.voiceText);
-        
-        if (skill2Result.status === 'interrupted') {
-            steps[steps.length - 1] = { ...steps[steps.length - 1], status: 'failed', result: skill2Result };
-            log(`❌ Skill2 失败：${skill2Result.interrupt_reason}`, 'error');
-            
-            currentStep++;
-            steps.push({ step: currentStep, name: 'Skill6: 生成跟单（兜底）', status: 'running' });
-            const skill6Result = await skill6_createFollowup(trackWorkId, skill1Result.servWorkId, '', '', '挂起跟单', skill2Result.interrupt_reason);
-            
-            if (!skill6Result.success) {
-                steps[steps.length - 1] = { ...steps[steps.length - 1], status: 'failed', result: skill6Result };
-                log(`❌ Skill6 失败：${skill6Result.fail_reason}`, 'error');
-            } else {
-                steps[steps.length - 1] = { ...steps[steps.length - 1], status: 'completed', result: skill6Result };
-            }
-            
-            return {
-                success: false,
-                fail_at: 'Skill2',
-                fail_reason: skill2Result.interrupt_reason,
-                steps,
-                final_result: skill6Result
-            };
-        }
-        
-        steps[steps.length - 1] = { ...steps[steps.length - 1], status: 'completed', result: skill2Result };
-        
-        // Step 3: 根据意图执行分支
-        const intentName = skill2Result.intent_name;
-        log(`🎯 意图分类：${intentName}`, 'info');
-        
-        if (intentName === '确认上门') {
-            // Skill3 + Skill4
-            currentStep++;
-            steps.push({ step: currentStep, name: 'Skill3: 跟单处理', status: 'running' });
-            const skill3Result = await skill3_handleTrack(trackWorkId, skill1Result.servWorkId, intentName, skill2Result.intent_result);
-            
-            if (!skill3Result.success) {
-                steps[steps.length - 1] = { ...steps[steps.length - 1], status: 'failed', result: skill3Result };
-                log(`❌ Skill3 失败：${skill3Result.fail_reason}`, 'error');
-                return { success: false, fail_at: 'Skill3', fail_reason: skill3Result.fail_reason, steps };
-            }
-            steps[steps.length - 1] = { ...steps[steps.length - 1], status: 'completed', result: skill3Result };
-            
-            currentStep++;
-            steps.push({ step: currentStep, name: 'Skill4: 改约', status: 'running' });
-            const skill4Result = await skill4_modifyTime(trackWorkId, skill1Result.servWorkId);
-            
-            if (!skill4Result.success) {
-                steps[steps.length - 1] = { ...steps[steps.length - 1], status: 'failed', result: skill4Result };
-                log(`❌ Skill4 失败：${skill4Result.fail_reason}`, 'error');
-                return { success: false, fail_at: 'Skill4', fail_reason: skill4Result.fail_reason, steps };
-            }
-            steps[steps.length - 1] = { ...steps[steps.length - 1], status: 'completed', result: skill4Result };
-            
-            return {
-                success: true,
-                intent: intentName,
-                steps,
-                final_result: skill4Result
-            };
-            
-        } else if (intentName === '用户询价') {
-            // Skill3 + Skill5
-            currentStep++;
-            steps.push({ step: currentStep, name: 'Skill3: 跟单处理', status: 'running' });
-            const skill3Result = await skill3_handleTrack(trackWorkId, skill1Result.servWorkId, intentName, skill2Result.intent_result);
-            
-            if (!skill3Result.success) {
-                steps[steps.length - 1] = { ...steps[steps.length - 1], status: 'failed', result: skill3Result };
-                log(`❌ Skill3 失败：${skill3Result.fail_reason}`, 'error');
-                return { success: false, fail_at: 'Skill3', fail_reason: skill3Result.fail_reason, steps };
-            }
-            steps[steps.length - 1] = { ...steps[steps.length - 1], status: 'completed', result: skill3Result };
-            
-            currentStep++;
-            steps.push({ step: currentStep, name: 'Skill5: 取消', status: 'running' });
-            const skill5Result = await skill5_cancelWork(trackWorkId, skill1Result.servWorkId, '用户询价后未确认');
-            
-            if (!skill5Result.success) {
-                steps[steps.length - 1] = { ...steps[steps.length - 1], status: 'failed', result: skill5Result };
-                log(`❌ Skill5 失败：${skill5Result.fail_reason}`, 'error');
-                return { success: false, fail_at: 'Skill5', fail_reason: skill5Result.fail_reason, steps };
-            }
-            steps[steps.length - 1] = { ...steps[steps.length - 1], status: 'completed', result: skill5Result };
-            
-            return {
-                success: true,
-                intent: intentName,
-                steps,
-                final_result: skill5Result
-            };
-            
-        } else {
-            // Skill6 - 其他意图
-            currentStep++;
-            steps.push({ step: currentStep, name: 'Skill6: 生成跟单', status: 'running' });
-            const skill6Result = await skill6_createFollowup(trackWorkId, skill1Result.servWorkId, intentName, skill2Result.intent_result, '挂起跟单');
-
-            if (!skill6Result.success) {
-                steps[steps.length - 1] = { ...steps[steps.length - 1], status: 'failed', result: skill6Result };
-                log(`❌ Skill6 失败：${skill6Result.fail_reason}`, 'error');
-            } else {
-                steps[steps.length - 1] = { ...steps[steps.length - 1], status: 'completed', result: skill6Result };
-            }
 
             return {
-                success: true,
+                success: skill6Result.success,
                 intent: intentName,
                 steps,
                 final_result: skill6Result
             };
         }
-        
+
     } catch (error) {
         log(`❌ 工作流执行异常：${error.message}`, 'error');
         return {
@@ -1293,6 +1484,21 @@ const server = http.createServer(async (req, res) => {
         return;
     }
     
+    // 静态文件服务 - 提供 tasks.html
+    if (pathname === '/tasks.html' && req.method === 'GET') {
+        const fs = require('fs');
+        const htmlPath = path.join(__dirname, '..', 'tasks.html');
+        if (fs.existsSync(htmlPath)) {
+            const content = fs.readFileSync(htmlPath, 'utf8');
+            res.writeHead(200, { 'Content-Type': 'text/html;charset=utf-8' });
+            res.end(content);
+        } else {
+            res.writeHead(404, { 'Content-Type': 'text/plain' });
+            res.end('Not found');
+        }
+        return;
+    }
+    
     // 健康检查
     if (pathname === '/health' && req.method === 'GET') {
         res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -1306,7 +1512,7 @@ const server = http.createServer(async (req, res) => {
         req.on('data', chunk => body += chunk);
         req.on('end', async () => {
             try {
-                const { trackWorkId, useSandbox = true } = JSON.parse(body);
+                const { trackWorkId, workId, env = 'test', taskItemId = '1202', useSandbox = true } = JSON.parse(body);
 
                 if (!trackWorkId) {
                     res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -1314,7 +1520,13 @@ const server = http.createServer(async (req, res) => {
                     return;
                 }
 
-                log(`📥 收到执行请求：trackWorkId=${trackWorkId}, useSandbox=${useSandbox}`, 'info');
+                log(`📥 收到执行请求：trackWorkId=${trackWorkId}, env=${env}`, 'info');
+
+                // 设置当前执行的 trackId 用于日志记录
+                setCurrentTrackId(trackWorkId);
+
+                // 更新数据库状态为执行中
+                updateTaskStatus(trackWorkId, 'processing', '执行中');
 
                 let sandboxId = null;
                 let result;
@@ -1333,8 +1545,8 @@ const server = http.createServer(async (req, res) => {
                     });
 
                     try {
-                        // 3. 执行工作流
-                        result = await runWorkflow(trackWorkId);
+                        // 3. 执行工作流 - 传递环境参数
+                        result = await runWorkflow(trackWorkId, taskItemId, env);
 
                         // 4. 添加完成记录
                         await SANDBOX.addHistory(sandboxId, {
@@ -1376,8 +1588,38 @@ const server = http.createServer(async (req, res) => {
 
                 log(`📤 执行完成：success=${result.success}${sandboxId ? `, sandboxId=${sandboxId}` : ''}`, 'info');
                 
+                // 根据执行结果更新状态
+                if (result.success) {
+                    // 检查是否执行了 Skill6（创建跟单）
+                    const steps = result.steps || [];
+                    const skill6Steps = steps.filter(s => s.name && s.name.includes('Skill6'));
+                    const hasSkill6 = skill6Steps.some(s => s.status === 'completed');
+                    
+                    if (hasSkill6) {
+                        updateTaskStatus(trackWorkId, 'manual', '转人工');
+                    } else {
+                        updateTaskStatus(trackWorkId, 'completed', '已完成');
+                    }
+                } else {
+                    updateTaskStatus(trackWorkId, 'error', '异常');
+                }
+                
+                // 保存日志到数据库
+                saveLogs();
+                
+                // 清除当前 trackId
+                setCurrentTrackId(null);
+                
             } catch (error) {
                 console.error('❌ 执行异常:', error);
+                
+                // 更新状态为异常
+                if (trackWorkId) {
+                    updateTaskStatus(trackWorkId, 'error', '异常');
+                    saveLogs();
+                    setCurrentTrackId(null);
+                }
+                
                 res.writeHead(500, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({ error: error.message, stack: error.stack }));
             }
@@ -1439,6 +1681,59 @@ const server = http.createServer(async (req, res) => {
         }
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(archives.sort((a, b) => b.modified - a.modified)));
+        return;
+    }
+
+    // 获取任务日志
+    if (pathname === '/logs' && req.method === 'GET') {
+        const urlParts = new URL(req.url, `http://${req.headers.host}`);
+        const trackId = urlParts.searchParams.get('trackId');
+        
+        if (!trackId) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: '缺少 trackId 参数' }));
+            return;
+        }
+        
+        const logs = getTaskLogs(trackId);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ trackId, logs }));
+        return;
+    }
+
+    // 获取任务列表
+    if (pathname === '/tasks' && req.method === 'GET') {
+        const urlParts = new URL(req.url, `http://${req.headers.host}`);
+        const status = urlParts.searchParams.get('status');
+        const date = urlParts.searchParams.get('date');
+        
+        let sql = 'SELECT * FROM tasks WHERE 1=1';
+        const params = [];
+        
+        if (status && status !== 'all') {
+            sql += ' AND status = ?';
+            params.push(status);
+        }
+        if (date) {
+            sql += ' AND date = ?';
+            params.push(date);
+        }
+        sql += ' ORDER BY create_time DESC';
+        
+        try {
+            const stmt = db.prepare(sql);
+            stmt.bind(params);
+            const results = [];
+            while (stmt.step()) {
+                results.push(stmt.getAsObject());
+            }
+            stmt.free();
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(results));
+        } catch (e) {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: e.message }));
+        }
         return;
     }
 
