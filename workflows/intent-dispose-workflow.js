@@ -77,18 +77,47 @@ function printSummary(success, failAt, failReason, steps) {
 }
 
 // ==================== 认证加载 ====================
+// 全局环境配置
+let globalEnv = 'test';
+const API_CONFIG = {
+    test: {
+        trackBaseUrl: 'https://test3-track.xiujiadian.com',
+        aisBaseUrl: 'https://test-ais.xiujiadian.com',
+        ak: 'aikm_5b5f60ccf5c9457f83461d58'
+    },
+    prod: {
+        trackBaseUrl: 'https://track.xiujiadian.com',
+        aisBaseUrl: 'https://ais.xiujiadian.com',
+        ak: 'aikm_0e3de5bf7f5f4d09ab20ad97'
+    }
+};
+
 async function loadAuthConfig(skillName) {
-  const authPath = `${SKILLS_DIR}/${skillName}/.auth`;
+  const skillAuthPath = `${SKILLS_DIR}/${skillName}/.auth`;
   try {
-    const authContent = fs.readFileSync(authPath, 'utf8');
+    const authContent = fs.readFileSync(skillAuthPath, 'utf8');
     const authConfig = {};
     authContent.split('\n').forEach(line => {
       const idx = line.indexOf('=');
       if (idx > 0) authConfig[line.substring(0, idx).trim()] = line.substring(idx + 1).trim();
     });
+    
+    // 根据环境选择 AK
+    const isProd = globalEnv === 'prod';
+    authConfig.AK = isProd ? (authConfig.AK_PROD || API_CONFIG.prod.ak) : (authConfig.AK_TEST || API_CONFIG.test.ak);
+    
+    // 生产环境登录凭证
+    if (isProd) {
+      authConfig.USERNAME = authConfig.USERNAME_PROD;
+      authConfig.PASSWORD = authConfig.PASSWORD_PROD;
+    } else {
+      authConfig.USERNAME = authConfig.USERNAME_TEST;
+      authConfig.PASSWORD = authConfig.PASSWORD_TEST;
+    }
+    
     return authConfig;
   } catch (e) {
-    addLog('error', `加载认证失败: ${authPath}`, { error: e.message });
+    addLog('error', `加载认证失败: ${skillAuthPath}`, { error: e.message });
     return null;
   }
 }
@@ -579,10 +608,14 @@ async function skill4_createTrackTask(trackWorkId, workId, intentResult, taskIte
 }
 
 // ==================== 主流程 ====================
-async function runWorkflow(trackWorkId, intentType, taskItemId, useSandbox = false) {
+async function runWorkflow(trackWorkId, intentType, taskItemId, env = 'test') {
+  // 设置全局环境
+  globalEnv = env;
+  const currentConfig = API_CONFIG[env] || API_CONFIG.test;
+  
   addLog('info', `========== 意图识别后处置工作流开始 ==========`);
-  addLog('info', `输入: trackWorkId=${trackWorkId}, intentType=${intentType}, taskItemId=${taskItemId}`);
-  addLog('info', `沙箱模式: ${useSandbox ? '开启' : '关闭'}`);
+  addLog('info', `输入: trackWorkId=${trackWorkId}, intentType=${intentType}, taskItemId=${taskItemId}, env=${env}`);
+  addLog('info', `使用 API: ${currentConfig.trackBaseUrl}`);
 
   const steps = [];
   let currentStep = 0;
@@ -657,15 +690,24 @@ if (require.main === module) {
   const trackWorkId = args[0];
   const intentType = args[1];
   const taskItemId = args[2];
+  const env = args[3] || 'test'; // 环境参数: test/prod
 
   if (!trackWorkId) {
-    console.log('用法: node intent-dispose-workflow.js <trackWorkId> [intentType] [taskItemId] [--sandbox]');
-    console.log('示例: node intent-dispose-workflow.js 127325906441705088 type4 1202');
+    console.log('用法: node intent-dispose-workflow.js <trackWorkId> [intentType] [taskItemId] [env] [--sandbox]');
+    console.log('示例: node intent-dispose-workflow.js 127325906441705088 type4 1202 test');
     console.log('intentType枚举: type1=确认上门, type2=用户询价, type3=取消, type4=其他意图');
+    console.log('env: test(测试) 或 prod(生产)，默认test');
     process.exit(1);
   }
 
-  runWorkflow(trackWorkId, intentType, taskItemId).then(result => {
+  console.log('\n========== 任务参数 ==========');
+  console.log(`▶ 跟单ID: ${trackWorkId}`);
+  console.log(`▶ 意图类型: ${intentType}`);
+  console.log(`▶ 任务项ID: ${taskItemId || 1202}`);
+  console.log(`▶ 环境: ${env === 'prod' ? '生产' : '测试'}`);
+  console.log('================================\n');
+
+  runWorkflow(trackWorkId, intentType, taskItemId, env).then(result => {
     console.log('========== 执行结果 ==========');
     console.log(JSON.stringify(result, null, 2));
     process.exit(result.success ? 0 : 1);
