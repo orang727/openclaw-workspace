@@ -419,7 +419,8 @@ async function callWorkflowServer(trackId, task) {
         const postData = JSON.stringify({
             trackWorkId: trackId,
             workId: task.work_id || '',
-            env: 'test'
+            env: 'prod',
+            taskItemId: task.track_content_id || '1202'
         });
 
         const options = {
@@ -440,17 +441,33 @@ async function callWorkflowServer(trackId, task) {
             let body = '';
             res.on('data', chunk => body += chunk);
             res.on('end', () => {
-                console.log('工作流响应:', body.substring(0, 500));
+                console.log('工作流响应:', body.substring(0, 1000));
                 try {
                     const result = JSON.parse(body);
+                    // 保存工作流日志到数据库
+                    if (result.logs && result.logs.length > 0) {
+                        result.logs.forEach(log => {
+                            const level = log.category === 'ERROR' ? 'error' :
+                                         log.category === 'WARN' ? 'warn' : 'info';
+                            db.insertLog(trackId, `[${log.timestamp}] ${log.category}: ${log.message}`, level);
+                        });
+                    }
+                    // 保存步骤结果
+                    if (result.steps) {
+                        result.steps.forEach(step => {
+                            const stepLog = `Step ${step.step}: ${step.name} [${step.status}]`;
+                            db.insertLog(trackId, stepLog, step.status === 'failed' ? 'error' : 'info');
+                        });
+                    }
+
                     if (result.success) {
-                        db.insertLog(trackId, `[${formatDate(new Date())}] 执行成功: ${result.message || '完成'}`, 'info');
+                        db.insertLog(trackId, `[${formatDate(new Date())}] 执行成功: ${result.intent || '完成'}`, 'info');
                         db.updateTaskStatus(trackId, 'completed', '已完成');
                         resolve(result);
                     } else {
-                        db.insertLog(trackId, `[${formatDate(new Date())}] 执行失败: ${result.message || '未知错误'}`, 'error');
+                        db.insertLog(trackId, `[${formatDate(new Date())}] 执行失败: ${result.fail_reason || '未知错误'}`, 'error');
                         db.updateTaskStatus(trackId, 'error', '执行失败');
-                        reject(new Error(result.message || '执行失败'));
+                        reject(new Error(result.fail_reason || '执行失败'));
                     }
                 } catch (e) {
                     db.insertLog(trackId, `[${formatDate(new Date())}] 响应解析失败: ${e.message}`, 'error');

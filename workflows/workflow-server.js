@@ -1330,8 +1330,9 @@ async function runWorkflow(trackWorkId, taskItemId = '1202', env = 'test') {
     if (hangqiWorkflow && hangqiWorkflow.runWorkflow) {
         try {
             // 设置环境
-            hangqiWorkflow.globalEnv = env;
-            hangqiWorkflow.currentConfig = hangqiWorkflow.API_CONFIG[env] || hangqiWorkflow.API_CONFIG.test;
+            if (hangqiWorkflow.setGlobalEnv) {
+                hangqiWorkflow.setGlobalEnv(env);
+            }
 
             const result = await hangqiWorkflow.runWorkflow(trackWorkId, taskItemId, env);
 

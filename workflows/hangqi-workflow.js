@@ -771,6 +771,7 @@ async function runWorkflow(trackWorkId, taskItemId = 1202, env = 'test') {
       success: true,
       intent: intentName,
       steps,
+      logs: executionLogs,
       final_result: finalResult
     };
     
@@ -797,19 +798,21 @@ async function runWorkflow(trackWorkId, taskItemId = 1202, env = 'test') {
         intent: 'price_query',
         fallback: true,
         steps,
+        logs: executionLogs,
         final_result: skill6Result
       };
-      
+
     } catch (fallbackError) {
       addLog('ERROR', `兜底流程也失败: ${fallbackError.message}`);
       printSummary(false, `Step ${currentStep}`, error.message, steps);
-      
+
       return {
         success: false,
         fail_at: `Step ${currentStep}`,
         fail_reason: error.message,
         fallback_failed: fallbackError.message,
         steps,
+        logs: executionLogs,
         error: error.stack
       };
     }
@@ -846,7 +849,7 @@ if (require.main === module) {
       process.exit(1);
     });
 } else {
-  // 被模块化加载时，导出函数
+  // 被模块化加载时，导出函数和配置
   module.exports = {
     runWorkflow,
     skill1_getRecordText,
@@ -854,6 +857,11 @@ if (require.main === module) {
     skill3_handleTrack,
     skill4_modifyDutyTime,
     skill5_cancelWork,
-    skill6_createTrackTask
+    skill6_createTrackTask,
+    API_CONFIG,
+    setGlobalEnv: (env) => {
+      globalEnv = env;
+      currentConfig = API_CONFIG[env] || API_CONFIG.test;
+    }
   };
 }
