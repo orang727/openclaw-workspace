@@ -27,7 +27,7 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "workspace/skills/call-record-query/SKILL.md",
+                "file": "workspace/skills/handle-track-work/SKILL.md",
                 "mode": "source",
                 "source": false
               },
@@ -93,7 +93,7 @@
       }
     ],
     "direction": "horizontal",
-    "width": 226.5
+    "width": 446.5
   },
   "right": {
     "id": "c393b89b1867c679",
@@ -195,32 +195,37 @@
       "bases:新建数据库": false
     }
   },
-  "active": "9d2b441e8b9e1ccc",
+  "active": "fd01f7035978d75e",
   "lastOpenFiles": [
-    "agents/main/sessions/9b8e0e70-da7a-4803-a86f-beabac9195cf.jsonl.lock",
-    "agents/main/sessions/sessions.json.lock",
-    "agents/main/sessions/bfb77614-61fe-41be-a4ab-0994f8c142e8.jsonl.lock",
-    "exec-approvals.json",
-    "agents/main/sessions/sessions.json.0a03c949-ac4a-4770-a233-c3a9cf46c84f.tmp",
-    "skills/create-track-task/index.js",
-    "skills/create-track-task",
-    "skills/cancel-work/index.js",
-    "skills/cancel-work",
-    "skills/modify-duty-time/index.js",
-    "skills/modify-duty-time",
-    "workspace/intention-post-processing/README.md",
-    "workspace/skills/recording-intention/SKILL.md",
     "workspace/skills/call-record-query/SKILL.md",
+    "agents/main/sessions/2e784a7c-028b-42ff-9fb1-e49fa3b1f753.jsonl.lock",
+    "agents/main/sessions/sessions.json.lock",
+    "workspace/skills/call-record-query/SKILL.md.crdownload",
+    "workspace/skills/recording-intention/SKILL.md",
+    "workspace/workflows/hangqi-workflow.js.tmp",
+    "workspace/skills/create-track-task/SKILL.md.crdownload",
+    "agents/main/sessions/sessions.json.57c5ef87-9338-4594-9260-cbc64b65166a.tmp",
+    "workspace/skills/cancel-work/SKILL.md",
+    "agents/main/sessions/8473d512-ad10-4a8b-9220-bfb15827b007.jsonl.lock",
+    "agents/main/sessions/sessions.json.90f4d2b1-c1eb-43d7-8773-c6817e60fdd0.tmp",
+    "workspace/workflows/fix-url.js",
     "workspace/skills/track-list-query/SKILL.md",
     "workspace/skills/handle-track-work/SKILL.md",
     "workspace/skills/modify-duty-time/SKILL.md",
+    "workspace/skills/intent-router/SKILL.md",
+    "workspace/skills/get-call-record/SKILL.md",
     "workspace/skills/create-track-task/SKILL.md",
+    "agents/main/sessions/sessions.json.29472f46-2bd6-4823-8a9e-3ce8315c187e.tmp",
+    "workspace/skills/call-record-query_v3/SKILL.md",
+    "workspace/skills/call-record-query_v1/SKILL.md",
+    "workspace/skills/recording-intention/recording-intention/SKILL.md",
+    "workspace/skills/recording-intention/recording-intention/README.md",
+    "workspace/memory/2026-03-24-type2-workflow-exec.md",
+    "workspace/intention-post-processing/README.md",
     "workspace/MEMORY.md",
     "xiujiadian.md",
-    "workspace/skills/cancel-work/SKILL.md",
     "workspace/memory/2026-03-22.md",
     "未命名 1.canvas",
-    "未命名.canvas",
-    "workspace/skills/get-call-record/SKILL.md"
+    "未命名.canvas"
   ]
 }

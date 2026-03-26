@@ -1,0 +1,55 @@
+name: SKILL Workflow Consistency Check
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'workspace/skills/**'
+      - 'workspace/workflows/**'
+      - 'tools/skill-consistency-check/**'
+  pull_request:
+    paths:
+      - 'workspace/skills/**'
+      - 'workspace/workflows/**'
+      - 'tools/skill-consistency-check/**'
+
+jobs:
+  consistency-check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Run consistency check
+        run: |
+          node tools/skill-consistency-check/index.js --json > consistency-report.json
+
+      - name: Display results
+        run: |
+          echo "=== SKILL Workflow Consistency Check ==="
+          node tools/skill-consistency-check/index.js --verbose
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: consistency-report
+          path: consistency-report.json
+          retention-days: 30
+
+      - name: Fail if check failed
+        if: failure()
+        run: |
+          echo ""
+          echo "❌ 检查失败! 请确保 SKILL.md 和 workflow.js 中的 API 定义一致。"
+          echo "常见问题:"
+          echo "  1. API 地址不一致"
+          echo "  2. 请求参数缺失或多余"
+          echo "  3. 固定值（如 applySource, bizSource）不正确"
+          exit 1

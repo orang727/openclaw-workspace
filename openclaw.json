@@ -1,7 +1,7 @@
 {
   "meta": {
     "lastTouchedVersion": "2026.3.13",
-    "lastTouchedAt": "2026-03-20T08:25:02.110Z"
+    "lastTouchedAt": "2026-03-23T14:39:13.082Z"
   },
   "wizard": {
     "lastRunAt": "2026-03-20T08:24:53.301Z",
@@ -102,7 +102,7 @@
   "agents": {
     "defaults": {
       "model": {
-        "primary": "doubao/doubao-seed-2-0-pro-260215"
+        "primary": "minimax-portal/MiniMax-M2.5"
       },
       "models": {
         "doubao/doubao-seed-2-0-pro-260215": {
@@ -119,11 +119,20 @@
         }
       },
       "workspace": "C:\\Users\\admin\\.openclaw\\workspace"
-    }
+    },
+    "list": [
+      {
+        "id": "main",
+        "model": "minimax-portal/MiniMax-M2.5"
+      }
+    ]
   },
   "tools": {
     "profile": "coding",
-    "alsoAllow": ["lobster", "llm-task"]
+    "alsoAllow": [
+      "lobster",
+      "llm-task"
+    ]
   },
   "commands": {
     "native": "auto",
@@ -161,7 +170,9 @@
       "connectionMode": "websocket",
       "domain": "feishu",
       "groupPolicy": "open",
-      "allowList": ["ou_ab3820ff88bfeaeb7e00c81ecb0b9ab1"]
+      "allowList": [
+        "ou_ab3820ff88bfeaeb7e00c81ecb0b9ab1"
+      ]
     }
   },
   "gateway": {

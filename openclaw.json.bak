@@ -1,6 +1,10 @@
 {
+  "meta": {
+    "lastTouchedVersion": "2026.3.13",
+    "lastTouchedAt": "2026-03-23T14:39:04.800Z"
+  },
   "wizard": {
-    "lastRunAt": "2026-03-20T08:19:11.228Z",
+    "lastRunAt": "2026-03-20T08:24:53.301Z",
     "lastRunVersion": "2026.3.13",
     "lastRunCommand": "onboard",
     "lastRunMode": "local"
@@ -69,15 +73,41 @@
             "maxTokens": 8192
           }
         ]
+      },
+      "doubao": {
+        "baseUrl": "https://ark.cn-beijing.volces.com/api/coding/v3",
+        "apiKey": "3b921bb9-5c6f-4f23-9a40-4b721df28ef4",
+        "api": "openai-completions",
+        "models": [
+          {
+            "id": "doubao-seed-2-0-pro-260215",
+            "name": "Doubao Seed 2.0 Pro",
+            "reasoning": false,
+            "input": [
+              "text"
+            ],
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0
+            },
+            "contextWindow": 262144,
+            "maxTokens": 32768
+          }
+        ]
       }
     }
   },
   "agents": {
     "defaults": {
       "model": {
-        "primary": "minimax-portal/MiniMax-M2.5"
+        "primary": "doubao/doubao-seed-2-0-pro-260215"
       },
       "models": {
+        "doubao/doubao-seed-2-0-pro-260215": {
+          "alias": "doubao"
+        },
         "minimax-portal/MiniMax-M2.5": {
           "alias": "minimax-m2.5"
         },
@@ -89,10 +119,20 @@
         }
       },
       "workspace": "C:\\Users\\admin\\.openclaw\\workspace"
-    }
+    },
+    "list": [
+      {
+        "id": "main",
+        "model": "minimax-portal/MiniMax-M2.5"
+      }
+    ]
   },
   "tools": {
-    "profile": "coding"
+    "profile": "coding",
+    "alsoAllow": [
+      "lobster",
+      "llm-task"
+    ]
   },
   "commands": {
     "native": "auto",
@@ -129,7 +169,10 @@
       "appSecret": "XBEpkaYoSZhh7A5lCleGyfgwsiJvX2EY",
       "connectionMode": "websocket",
       "domain": "feishu",
-      "groupPolicy": "open"
+      "groupPolicy": "open",
+      "allowList": [
+        "ou_ab3820ff88bfeaeb7e00c81ecb0b9ab1"
+      ]
     }
   },
   "gateway": {
@@ -138,7 +181,7 @@
     "bind": "loopback",
     "auth": {
       "mode": "token",
-      "token": "4de2b4f3747683a8335f7b2b260bef985ddbc7e01ea8a80a"
+      "token": "64a4ffec94093067b0fb0927527cffdb3e4e51cd15a46083"
     },
     "tailscale": {
       "mode": "off",
@@ -156,6 +199,11 @@
       ]
     }
   },
+  "skills": {
+    "install": {
+      "nodeManager": "npm"
+    }
+  },
   "plugins": {
     "load": {
       "paths": [
@@ -168,11 +216,10 @@
       },
       "feishu": {
         "enabled": true
+      },
+      "llm-task": {
+        "enabled": true
       }
     }
-  },
-  "meta": {
-    "lastTouchedVersion": "2026.3.13",
-    "lastTouchedAt": "2026-03-20T08:19:11.707Z"
   }
 }
