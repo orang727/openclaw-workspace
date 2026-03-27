@@ -452,27 +452,42 @@ async function callWorkflowServer(trackId, task) {
                             db.insertLog(trackId, `[${log.timestamp}] ${log.category}: ${log.message}`, level);
                         });
                     }
-                    // 保存步骤结果
+                    // 保存步骤结果，生成完整执行动作序列
                     let lastStepName = '';
+                    let execActionSteps = '';
                     if (result.steps) {
+                        const stepParts = [];
                         result.steps.forEach(step => {
                             const stepLog = `Step ${step.step}: ${step.name} [${step.status}]`;
                             db.insertLog(trackId, stepLog, step.status === 'failed' ? 'error' : 'info');
                             lastStepName = step.name;
+                            stepParts.push(stepLog);
                         });
+                        execActionSteps = stepParts.join('→');
                     }
 
                     // 获取最后一条日志作为执行结果
                     const logs = db.getTaskLogs(trackId);
                     const lastLog = logs.length > 0 ? logs[logs.length - 1].log_content : '';
 
+                    // 从 steps 中提取 Skill2 的结果
+                    let intentContent = result.intent || '';  // intent_name (意图分类)
+                    let intentCategory = '';
+                    if (result.steps) {
+                        const skill2Step = result.steps.find(s => s.name && s.name.includes('Skill2'));
+                        if (skill2Step && skill2Step.result) {
+                            intentContent = skill2Step.result.intent_name || intentContent;
+                            intentCategory = skill2Step.result.category || '';
+                        }
+                    }
+
                     if (result.success) {
-                        db.insertLog(trackId, `[${formatDate(new Date())}] 执行成功: ${result.intent || '完成'}`, 'info');
-                        db.updateTaskStatus(trackId, 'completed', '已完成', lastStepName, lastLog, result.intent || '');
+                        db.insertLog(trackId, `[${formatDate(new Date())}] 执行成功: ${intentContent || '完成'}`, 'info');
+                        db.updateTaskStatus(trackId, 'completed', '已完成', execActionSteps, '', intentContent, intentCategory);
                         resolve(result);
                     } else {
                         db.insertLog(trackId, `[${formatDate(new Date())}] 执行失败: ${result.fail_reason || '未知错误'}`, 'error');
-                        db.updateTaskStatus(trackId, 'error', '执行失败', lastStepName, lastLog, result.intent || '');
+                        db.updateTaskStatus(trackId, 'error', '执行失败', execActionSteps, '', intentContent, intentCategory);
                         reject(new Error(result.fail_reason || '执行失败'));
                     }
                 } catch (e) {

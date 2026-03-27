@@ -54,6 +54,7 @@ function createTables() {
             city_id TEXT,
             create_time TEXT NOT NULL,
             intent_content TEXT,
+            intent_category TEXT,
             confidence TEXT,
             status TEXT DEFAULT 'pending',
             exec_status TEXT DEFAULT '等待中',
@@ -71,6 +72,17 @@ function createTables() {
             created_at TEXT DEFAULT (datetime('now'))
         )
     `);
+
+    // 迁移：添加缺失的列（如果表已存在但列不存在）
+    try {
+        db.run(`ALTER TABLE tasks ADD COLUMN intent_category TEXT`);
+    } catch (e) {}
+    try {
+        db.run(`ALTER TABLE tasks ADD COLUMN exec_action TEXT`);
+    } catch (e) {}
+    try {
+        db.run(`ALTER TABLE tasks ADD COLUMN exec_result TEXT`);
+    } catch (e) {}
     
     // 执行日志表
     db.run(`
@@ -122,22 +134,25 @@ function getDB() {
 // 插入任务 - 使用INSERT OR REPLACE基于track_id去重
 function insertTask(task) {
     const stmt = db.prepare(`
-        INSERT OR REPLACE INTO tasks (track_id, track_content_id, task_type, city, city_id, create_time, intent_content, confidence, status, exec_status, complete_time, mode, date, reason_name, track_type_name, track_level_name, work_id, promoter, operate_remark)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT OR REPLACE INTO tasks (track_id, track_content_id, task_type, city, city_id, create_time, intent_content, intent_category, confidence, status, exec_status, exec_action, exec_result, complete_time, mode, date, reason_name, track_type_name, track_level_name, work_id, promoter, operate_remark)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     stmt.run([
-        task.track_id, 
+        task.track_id,
         task.track_content_id || '',
-        task.task_type || '申请挂起', 
+        task.task_type || '申请挂起',
         task.city || '',
         task.city_id || '',
-        task.create_time, 
+        task.create_time,
         task.intent_content || '',
+        task.intent_category || '',
         task.confidence || '',
-        task.status, 
-        task.exec_status || '等待中', 
+        task.status,
+        task.exec_status || '等待中',
+        task.exec_action || '',
+        task.exec_result || '',
         task.complete_time || '',
-        task.mode || 'manual', 
+        task.mode || 'manual',
         task.date || '',
         task.reason_name || '',
         task.track_type_name || '',
@@ -243,7 +258,7 @@ function getTaskLogs(taskId) {
 }
 
 // 更新任务状态
-function updateTaskStatus(trackId, status, execStatus, execAction = null, execResult = null, intentContent = null) {
+function updateTaskStatus(trackId, status, execStatus, execAction = null, execResult = null, intentContent = null, intentCategory = null) {
     let sql = 'UPDATE tasks SET status = ?, exec_status = ?';
     const params = [status, execStatus];
 
@@ -258,6 +273,10 @@ function updateTaskStatus(trackId, status, execStatus, execAction = null, execRe
     if (intentContent !== null) {
         sql += ', intent_content = ?';
         params.push(intentContent);
+    }
+    if (intentCategory !== null) {
+        sql += ', intent_category = ?';
+        params.push(intentCategory);
     }
 
     sql += ' WHERE track_id = ?';

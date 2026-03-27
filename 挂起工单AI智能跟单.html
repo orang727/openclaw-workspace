@@ -187,7 +187,7 @@
         }
         .task-header {
             display: grid;
-            grid-template-columns: 1.8fr 0.7fr 0.5fr 0.9fr 1fr 0.5fr 0.5fr 0.9fr 1.3fr 0.8fr 70px;
+            grid-template-columns: 1.6fr 0.6fr 0.5fr 0.8fr 0.7fr 0.9fr 0.5fr 0.4fr 1.5fr 0.8fr 70px;
             padding: 12px 16px;
             background: #f8f9fa;
             font-weight: 600;
@@ -200,7 +200,7 @@
         }
         .task-item {
             display: grid;
-            grid-template-columns: 1.8fr 0.7fr 0.5fr 0.9fr 1fr 0.5fr 0.5fr 0.9fr 1.3fr 0.8fr 70px;
+            grid-template-columns: 1.6fr 0.6fr 0.5fr 0.8fr 0.7fr 0.9fr 0.5fr 0.4fr 1.5fr 0.8fr 70px;
             padding: 12px 16px;
             border-bottom: 1px solid #f0f0f0;
             font-size: 12px;
@@ -316,7 +316,10 @@
         .log-error {
             color: #f14c4c;
         }
-        
+        .log-success {
+            color: #4ec9b0;
+        }
+
         /* 详情页 */
         .detail-header {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -499,11 +502,11 @@
                             <span>跟单内容</span>
                             <span>城市</span>
                             <span>发起时间</span>
+                            <span>意向分类</span>
                             <span>意向内容</span>
                             <span>状态</span>
                             <span>执行</span>
                             <span>执行动作</span>
-                            <span>执行结果</span>
                             <span>完成时间</span>
                             <span>操作</span>
                         </div>
@@ -713,12 +716,13 @@
                 const result = await res.json();
                 if (result.code === 0) {
                     currentLogs = result.data.logs || [];
-                    return result.data.logs.map(l => l.log_content).join('\n');
+                    // 返回包含 id 的日志数组，用于增量轮询
+                    return result.data.logs || [];
                 }
             } catch (err) {
                 console.error('获取日志失败:', err);
             }
-            return '';
+            return [];
         }
         
         // 筛选任务
@@ -760,11 +764,11 @@
                     <div class="task-type">${task.task_type || '申请挂起'}</div>
                     <div class="task-city">${task.city || '—'}</div>
                     <div class="task-time">${task.create_time}</div>
+                    <div class="task-category">${task.intent_category || '—'}</div>
                     <div class="task-intent">${task.intent_content || '—'}</div>
                     <div><span class="status-badge status-${task.status}">${getStatusText(task.status)}</span></div>
                     <div>${task.exec_status}</div>
-                    <div class="task-action">${task.exec_action || '—'}</div>
-                    <div class="task-result" title="${task.exec_result || ''}">${task.exec_result ? (task.exec_result.length > 25 ? task.exec_result.substring(0, 25) + '...' : task.exec_result) : '—'}</div>
+                    <div class="task-action" title="${task.exec_action || ''}">${task.exec_action || '—'}</div>
                     <div class="task-complete-time">${task.complete_time || '—'}</div>
                     <div style="display: flex; gap: 4px; justify-content: flex-start;">
                         ${task.status === 'pending' ? '<button class="action-btn" onclick="event.stopPropagation(); executeTask(\'' + task.track_id + '\')">执行</button>' : ''}
@@ -805,16 +809,35 @@
         // 更新日志面板
         function updateLogPanel(logs) {
             const container = document.getElementById('log-content');
-            if (!logs) {
-                logs = '暂无日志';
+            if (!logs || (Array.isArray(logs) && logs.length === 0)) {
+                container.innerHTML = '<div class="log-entry"><span class="log-info">暂无日志</span></div>';
+                return;
             }
-            const lines = logs.split('\n').map(line => {
-                let cls = 'log-info';
-                if (line.includes('[WARN]')) cls = 'log-warn';
-                if (line.includes('[ERROR]')) cls = 'log-error';
-                return `<div class="log-entry"><span class="log-time">${line.split(' ')[0] || ''}</span><span class="${cls}">${line}</span></div>`;
-            }).join('');
-            container.innerHTML = lines;
+
+            // 支持数组和字符串两种格式
+            let html = '';
+            if (Array.isArray(logs)) {
+                logs.forEach(log => {
+                    const line = log.log_content || '';
+                    let cls = 'log-info';
+                    if (line.includes('[WARN]')) cls = 'log-warn';
+                    if (line.includes('[ERROR]')) cls = 'log-error';
+                    if (line.includes('[SUCCESS]')) cls = 'log-success';
+                    html += `<div class="log-entry"><span class="${cls}">${line}</span></div>`;
+                });
+            } else {
+                // 字符串格式（兼容旧代码）
+                const lines = logs.split('\n');
+                lines.forEach(line => {
+                    let cls = 'log-info';
+                    if (line.includes('[WARN]')) cls = 'log-warn';
+                    if (line.includes('[ERROR]')) cls = 'log-error';
+                    if (line.includes('[SUCCESS]')) cls = 'log-success';
+                    html += `<div class="log-entry"><span class="${cls}">${line}</span></div>`;
+                });
+            }
+            container.innerHTML = html;
+            container.scrollTop = container.scrollHeight;
         }
         
         // 查看详情
@@ -828,25 +851,81 @@
             if (!confirm('确定要立即执行该任务吗？')) return;
 
             try {
-                // 先更新状态为处理中
-                const res = await fetch(`${API_BASE}/execute`, {
+                // 清空日志面板，开始实时显示
+                const logContainer = document.getElementById('log-content');
+                logContainer.innerHTML = '<div class="log-entry"><span class="log-info">开始执行任务...</span></div>';
+                let lastLogId = 0;
+                let pollingCount = 0;
+                const maxPollingCount = 150; // 最多轮询5分钟(150*2秒)
+
+                // 启动轮询，获取实时日志
+                const pollInterval = setInterval(async () => {
+                    try {
+                        const logs = await fetchTaskLogs(taskId);
+                        const status = await fetchTaskStatus(taskId);
+
+                        // 只显示新增的日志
+                        const newLogs = logs.filter(log => log.id > lastLogId);
+                        if (newLogs.length > 0) {
+                            newLogs.forEach(log => {
+                                const div = document.createElement('div');
+                                div.className = 'log-entry';
+                                const cls = log.log_level === 'error' ? 'log-error' :
+                                           log.log_level === 'warn' ? 'log-warn' : 'log-info';
+                                div.innerHTML = `<span class="${cls}">${log.log_content}</span>`;
+                                logContainer.appendChild(div);
+                            });
+                            lastLogId = newLogs[newLogs.length - 1].id;
+                            // 滚动到底部
+                            logContainer.scrollTop = logContainer.scrollHeight;
+                        }
+
+                        pollingCount++;
+
+                        // 任务完成或失败，停止轮询
+                        if (status === 'completed' || status === 'error' || pollingCount >= maxPollingCount) {
+                            clearInterval(pollInterval);
+                            await renderTaskList();
+                            if (pollingCount >= maxPollingCount) {
+                                alert('执行超时，已停止轮询');
+                            } else if (status === 'completed') {
+                                alert('任务执行完成');
+                            }
+                        }
+                    } catch (e) {
+                        console.error('轮询日志失败:', e);
+                    }
+                }, 2000); // 每2秒轮询
+
+                // 触发执行（异步，不等待结果）
+                fetch(`${API_BASE}/execute`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ trackId: taskId })
+                }).catch(err => {
+                    console.error('执行任务失败:', err);
+                    clearInterval(pollInterval);
+                    alert('执行失败: ' + err.message);
                 });
-                const result = await res.json();
-                if (result.code === 0) {
-                    alert('任务执行完成');
-                } else {
-                    alert('执行失败: ' + result.message);
-                }
-                await renderTaskList();
-                // 执行完成后刷新日志
-                await selectTask(taskId);
+
             } catch (err) {
                 console.error('执行任务失败:', err);
                 alert('执行失败: ' + err.message);
             }
+        }
+
+        // 获取任务状态
+        async function fetchTaskStatus(taskId) {
+            try {
+                const res = await fetch(`${API_BASE}/task/${taskId}`);
+                const result = await res.json();
+                if (result.code === 0 && result.data) {
+                    return result.data.status;
+                }
+            } catch (e) {
+                console.error('获取任务状态失败:', e);
+            }
+            return 'unknown';
         }
         
         // 暂存查询结果
@@ -1010,27 +1089,35 @@
             if (!task) {
                 await fetchTasks();
             }
-            
+
             const taskData = tasks.find(t => t.track_id === taskId);
             if (!taskData) return;
-            
+
             document.getElementById('detail-id').textContent = taskData.track_id;
             document.getElementById('detail-name').textContent = taskData.task_name;
             document.getElementById('detail-task-id').textContent = taskData.task_id;
             document.getElementById('detail-create-time').textContent = taskData.create_time;
             document.getElementById('detail-status').textContent = getStatusText(taskData.status);
             document.getElementById('detail-exec-status').textContent = taskData.exec_status;
-            
+
             // 获取完整日志
             const logs = await fetchTaskLogs(taskId);
             const logContainer = document.getElementById('detail-log-content');
-            const lines = logs.split('\n').map(line => {
-                let cls = 'log-info';
-                if (line.includes('[WARN]')) cls = 'log-warn';
-                if (line.includes('[ERROR]')) cls = 'log-error';
-                return `<div>${line}</div>`;
-            }).join('');
-            logContainer.innerHTML = lines;
+
+            // 处理数组格式的日志
+            let html = '';
+            if (Array.isArray(logs)) {
+                logs.forEach(log => {
+                    const line = log.log_content || '';
+                    let cls = 'log-info';
+                    if (line.includes('[WARN]') || line.includes('⚠')) cls = 'log-warn';
+                    if (line.includes('[ERROR]') || line.includes('❌')) cls = 'log-error';
+                    if (line.includes('[SUCCESS]') || line.includes('✅')) cls = 'log-success';
+                    if (line.includes('════════')) cls = 'log-info';
+                    html += `<div class="log-entry"><span class="${cls}">${line}</span></div>`;
+                });
+            }
+            logContainer.innerHTML = html || '<div class="log-entry"><span class="log-info">暂无日志</span></div>';
         }
         
         // 初始化
