@@ -382,10 +382,14 @@ async function skill2_recognizeIntent(audioText, detectRecordId = null, recordin
     const category = intentionData.intention?.category || '';
     const confidenceScore = intentionData.intention?.confidence_score || intentionData.intention?.Confidence_score || 0;
 
-    // 映射到四种意图
+    // 映射到五种意图
     let intentName = 'other';
     if (category.includes('确认上门') || category.includes('确定上门') || category.includes('上门时间')) {
       intentName = 'confirm_visit';
+    } else if (category.includes('用户确定具体未来的上门时间') || category.includes('确定具体未来的上门时间')) {
+      intentName = 'agree_suspend';  // 同意挂起
+    } else if (category.includes('不确定上门时间') || category.includes('不确定') || category.includes('还没确定')) {
+      intentName = 'agree_suspend';  // 同意挂起
     } else if (category.includes('询价') || category.includes('报价') || category.includes('价格')) {
       intentName = 'price_query';
     } else if (category.includes('不需要') || category.includes('取消') || category.includes('不做了')) {
@@ -680,6 +684,48 @@ async function skill6_createTrackTask(trackWorkId, workId, taskItemId = 1202) {
   }
 }
 
+// Skill 7: 同意挂起（通过挂起申请）
+async function skill7_agreeSuspend(workId, trackWorkId) {
+  addLog('PROCESS', 'Skill7: 同意挂起', { workId, trackWorkId });
+
+  const authConfig = await loadAuthConfig('handle-track-work-approve');
+  if (!authConfig) throw new Error('认证配置加载失败');
+
+  const body = {
+    workId,
+    trackWorkId,
+    trackContentId: 1191,
+    handleOptionList: [{
+      optionId: 112,
+      optionName: '通过挂起申请',
+      optionLevel: 0
+    }],
+    handleJumpType: 0,
+    handleRemark: '用户同意挂起',
+    isCompleteTrack: 2
+  };
+
+  addLog('REQUEST', '提交同意挂起', { url: `${currentConfig.trackBaseUrl}/amis/track/save/newHandle` });
+
+  const response = await httpPost(`${currentConfig.trackBaseUrl}/amis/track/save/newHandle`,
+    { 'Authorization': `Bearer ${authConfig.AK}` },
+    body
+  );
+
+  const xmlText = await response.text();
+  addLog('RESPONSE', '同意挂起响应', { xml: xmlText.substring(0, 200) });
+
+  const status = parseXmlValue(xmlText, 'status');
+  const msg = parseXmlValue(xmlText, 'msg');
+
+  if (status !== '0') {
+    throw new Error(`同意挂起失败: ${msg}`);
+  }
+
+  addLog('SUCCESS', `Skill7完成: 同意挂起成功`);
+  return { success: true, msg };
+}
+
 // ==================== 主工作流 ====================
 async function runWorkflow(trackWorkId, taskItemId = 1202, env = 'test') {
   console.log('\n========== 挂起任务工作流 ==========');
@@ -753,12 +799,26 @@ async function runWorkflow(trackWorkId, taskItemId = 1202, env = 'test') {
 
     switch (intentName) {
       case 'confirm_visit':
+        // 确认上门时间：Skill3（挂起申请驳回）+ Skill4（改约）
+        await skill3_handleTrack(skill1Result.workId, trackWorkId, intentName);
         finalResult = await skill4_modifyDutyTime(trackWorkId);
         break;
+      case 'agree_suspend':
+        // 用户确定具体未来的上门时间 / 不确定上门时间：直接同意挂起
+        finalResult = await skill7_agreeSuspend(skill1Result.workId, trackWorkId);
+        break;
+      case 'price_query':
+        // 询价/报价：Skill3（挂起申请驳回）+ Skill6（创建跟单任务）
+        await skill3_handleTrack(skill1Result.workId, trackWorkId, intentName);
+        finalResult = await skill6_createTrackTask(trackWorkId, skill1Result.workId, taskItemId);
+        break;
       case 'cancel':
+        // 不需要/取消：Skill3（挂起申请驳回）+ Skill5（取消工单）
+        await skill3_handleTrack(skill1Result.workId, trackWorkId, intentName);
         finalResult = await skill5_cancelWork(trackWorkId);
         break;
       default:
+        // 其他/置信度低：Skill6（创建跟单任务）
         finalResult = await skill6_createTrackTask(trackWorkId, skill1Result.workId, taskItemId);
     }
     
@@ -858,6 +918,7 @@ if (require.main === module) {
     skill4_modifyDutyTime,
     skill5_cancelWork,
     skill6_createTrackTask,
+    skill7_agreeSuspend,
     API_CONFIG,
     setGlobalEnv: (env) => {
       globalEnv = env;
