@@ -315,7 +315,45 @@ async function startServer() {
                 res.end(JSON.stringify({ code: 0, data: cities }));
                 return;
             }
-            
+
+            // ==================== 批量执行API ====================
+
+            // 预览待处理任务数量
+            if (pathname === '/api/batch/preview' && req.method === 'GET') {
+                handleBatchPreview(res);
+                return;
+            }
+
+            // 开始批量执行
+            if (pathname === '/api/batch/start' && req.method === 'POST') {
+                handleBatchStart(res);
+                return;
+            }
+
+            // 获取批次状态
+            if (pathname === '/api/batch/status' && req.method === 'GET') {
+                handleBatchStatus(res);
+                return;
+            }
+
+            // 暂停批量执行
+            if (pathname === '/api/batch/pause' && req.method === 'POST') {
+                handleBatchPause(res);
+                return;
+            }
+
+            // 恢复批量执行
+            if (pathname === '/api/batch/resume' && req.method === 'POST') {
+                handleBatchResume(res);
+                return;
+            }
+
+            // 停止批量执行
+            if (pathname === '/api/batch/stop' && req.method === 'POST') {
+                handleBatchStop(res);
+                return;
+            }
+
             // 404
             res.writeHead(404);
             res.end(JSON.stringify({ code: 404, message: 'Not Found' }));
@@ -507,6 +545,372 @@ async function callWorkflowServer(trackId, task) {
         req.write(postData);
         req.end();
     });
+}
+
+// ==================== 批量自动执行 ====================
+
+// 配置参数
+const BATCH_CONFIG = {
+    batchSize: 100,           // 每批数量
+    batchInterval: 10000,     // 批次间隔（毫秒）
+    taskTimeout: 1200000,     // 单任务超时（20分钟）
+    maxRetries: 2             // 失败重试次数
+};
+
+// 全局批量执行状态
+let batchState = {
+    isRunning: false,
+    isPaused: false,
+    shouldStop: false,
+    currentBatchId: null,
+    completedCount: 0,
+    failedCount: 0,
+    currentTaskIndex: 0,
+    totalCount: 0,
+    taskQueue: [],
+    intervalId: null
+};
+
+// 生成批次ID
+function generateBatchId() {
+    return `batch_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+}
+
+// 包装函数：获取任务信息并调用工作流
+async function executeWorkflow(trackId, task) {
+    // 如果没有传入 task，从数据库获取
+    if (!task) {
+        task = db.getTaskById(trackId);
+    }
+    return callWorkflowServer(trackId, task);
+}
+
+// 执行单个任务（带重试）
+async function executeTaskWithRetry(trackId, retries = 0) {
+    return new Promise((resolve, reject) => {
+        // 设置超时
+        const timeout = setTimeout(() => {
+            reject(new Error('任务执行超时'));
+        }, BATCH_CONFIG.taskTimeout);
+
+        executeWorkflow(trackId)
+            .then(result => {
+                clearTimeout(timeout);
+                resolve(result);
+            })
+            .catch(error => {
+                clearTimeout(timeout);
+                if (retries < BATCH_CONFIG.maxRetries) {
+                    console.log(`[批量执行] 任务 ${trackId} 失败，${retries + 1}/${BATCH_CONFIG.maxRetries} 次重试...`);
+                    db.insertLog(trackId, `[批量执行] 重试 ${retries + 1}/${BATCH_CONFIG.maxRetries}: ${error.message}`, 'warn');
+                    // 等待3秒后重试
+                    setTimeout(() => {
+                        executeTaskWithRetry(trackId, retries + 1).then(resolve).catch(reject);
+                    }, 3000);
+                } else {
+                    reject(error);
+                }
+            });
+    });
+}
+
+// 批量执行主循环
+async function runBatchExecution() {
+    while (!batchState.shouldStop) {
+        // 检查是否暂停
+        if (batchState.isPaused) {
+            await sleep(1000);
+            continue;
+        }
+
+        // 检查是否还有待执行任务
+        if (batchState.currentTaskIndex >= batchState.taskQueue.length) {
+            // 所有任务执行完成
+            batchState.isRunning = false;
+            batchState.shouldStop = true;
+            db.updateBatchStatus(batchState.currentBatchId, 'completed');
+            console.log(`[批量执行] 批次 ${batchState.currentBatchId} 执行完成！成功: ${batchState.completedCount}, 失败: ${batchState.failedCount}`);
+            break;
+        }
+
+        // 取出一个任务
+        const trackId = batchState.taskQueue[batchState.currentTaskIndex];
+        batchState.currentTaskIndex++;
+
+        // 更新任务状态为处理中
+        db.updateTaskStatus(trackId, 'processing', '处理中');
+        db.insertLog(trackId, `[批量执行] 开始执行 (第${batchState.currentTaskIndex}/${batchState.totalCount}批)`, 'info');
+
+        try {
+            await executeTaskWithRetry(trackId);
+            batchState.completedCount++;
+            console.log(`[批量执行] ✅ ${trackId} (${batchState.currentTaskIndex}/${batchState.totalCount})`);
+        } catch (error) {
+            batchState.failedCount++;
+            console.log(`[批量执行] ❌ ${trackId} (${batchState.currentTaskIndex}/${batchState.totalCount}): ${error.message}`);
+        }
+
+        // 更新批次进度
+        db.updateBatchProgress(
+            batchState.currentBatchId,
+            batchState.currentTaskIndex,
+            batchState.completedCount,
+            batchState.failedCount
+        );
+
+        // 更新剩余任务列表
+        const remainingTasks = batchState.taskQueue.slice(batchState.currentTaskIndex);
+        db.updateBatchTaskIds(batchState.currentBatchId, remainingTasks);
+
+        // 批次间隔
+        if (batchState.currentTaskIndex % BATCH_CONFIG.batchSize === 0) {
+            console.log(`[批量执行] 已完成 ${batchState.currentTaskIndex}/${batchState.totalCount}，等待 ${BATCH_CONFIG.batchInterval / 1000}秒...`);
+            await sleep(BATCH_CONFIG.batchInterval);
+        }
+    }
+
+    batchState.isRunning = false;
+    batchState.shouldStop = false;
+}
+
+// 辅助函数：睡眠
+function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// API: 获取待处理任务数量
+function handleBatchPreview(res) {
+    const pendingTasks = db.getTasks({ status: 'pending' });
+    const totalCount = pendingTasks.length;
+    // 按发起时间正序
+    const sortedTasks = pendingTasks.sort((a, b) => {
+        const timeA = new Date('2026-' + a.create_time);
+        const timeB = new Date('2026-' + b.create_time);
+        return timeA - timeB;
+    });
+
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+        code: 0,
+        data: {
+            total_count: totalCount,
+            batch_count: Math.ceil(totalCount / BATCH_CONFIG.batchSize),
+            estimated_time: `${Math.round(totalCount * 20 / 60)} 分钟`,
+            first_batch_preview: sortedTasks.slice(0, 5).map(t => ({
+                track_id: t.track_id,
+                create_time: t.create_time
+            }))
+        }
+    }));
+}
+
+// API: 开始批量执行
+function handleBatchStart(res) {
+    // 检查是否已有批次在运行
+    const activeBatch = db.getActiveBatch();
+    if (activeBatch) {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+            code: 400,
+            message: '已有批次在执行中，请先停止或等待完成'
+        }));
+        return;
+    }
+
+    // 获取待处理任务
+    const pendingTasks = db.getTasks({ status: 'pending' });
+    if (pendingTasks.length === 0) {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+            code: 400,
+            message: '没有待处理的任务'
+        }));
+        return;
+    }
+
+    // 按发起时间正序
+    pendingTasks.sort((a, b) => {
+        const timeA = new Date('2026-' + a.create_time);
+        const timeB = new Date('2026-' + b.create_time);
+        return timeA - timeB;
+    });
+
+    // 生成批次ID
+    const batchId = generateBatchId();
+    const taskIds = pendingTasks.map(t => t.track_id);
+
+    // 创建批次记录
+    db.createBatch(batchId, taskIds);
+
+    // 初始化批量执行状态
+    batchState = {
+        isRunning: true,
+        isPaused: false,
+        shouldStop: false,
+        currentBatchId: batchId,
+        completedCount: 0,
+        failedCount: 0,
+        currentTaskIndex: 0,
+        totalCount: taskIds.length,
+        taskQueue: taskIds
+    };
+
+    console.log(`[批量执行] 批次 ${batchId} 开始，共 ${taskIds.length} 个任务`);
+
+    // 启动后台执行
+    runBatchExecution().catch(err => {
+        console.error('[批量执行] 执行出错:', err);
+        batchState.isRunning = false;
+        db.updateBatchStatus(batchId, 'stopped');
+    });
+
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+        code: 0,
+        data: {
+            batch_id: batchId,
+            total_count: taskIds.length,
+            message: '批量执行已开始'
+        }
+    }));
+}
+
+// API: 获取批次状态
+function handleBatchStatus(res) {
+    const activeBatch = db.getActiveBatch();
+
+    if (!activeBatch) {
+        // 检查最近完成的批次
+        const stmt = db.getDB().prepare(`
+            SELECT * FROM batch_progress
+            WHERE status IN ('completed', 'stopped')
+            ORDER BY finished_at DESC LIMIT 1
+        `);
+        let lastBatch = null;
+        if (stmt.step()) {
+            lastBatch = stmt.getAsObject();
+            if (lastBatch.task_ids) {
+                try {
+                    lastBatch.task_ids = JSON.parse(lastBatch.task_ids);
+                } catch (e) {
+                    lastBatch.task_ids = [];
+                }
+            }
+        }
+        stmt.free();
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+            code: 0,
+            data: {
+                is_running: false,
+                last_batch: lastBatch
+            }
+        }));
+        return;
+    }
+
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+        code: 0,
+        data: {
+            is_running: true,
+            is_paused: batchState.isPaused,
+            batch_id: activeBatch.batch_id,
+            total_count: activeBatch.total_count,
+            completed_count: batchState.completedCount,
+            failed_count: batchState.failedCount,
+            current_index: batchState.currentTaskIndex,
+            current_task_id: batchState.taskQueue[batchState.currentTaskIndex] || null,
+            status: activeBatch.status,
+            progress_percent: activeBatch.total_count > 0
+                ? ((batchState.currentTaskIndex / activeBatch.total_count) * 100).toFixed(1)
+                : 0
+        }
+    }));
+}
+
+// API: 暂停批量执行
+function handleBatchPause(res) {
+    const activeBatch = db.getActiveBatch();
+    if (!activeBatch) {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+            code: 400,
+            message: '没有正在执行的批次'
+        }));
+        return;
+    }
+
+    batchState.isPaused = true;
+    db.updateBatchStatus(activeBatch.batch_id, 'paused');
+    console.log(`[批量执行] 批次 ${activeBatch.batch_id} 已暂停`);
+
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+        code: 0,
+        message: '已暂停'
+    }));
+}
+
+// API: 恢复批量执行
+function handleBatchResume(res) {
+    const activeBatch = db.getActiveBatch();
+    if (!activeBatch) {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+            code: 400,
+            message: '没有正在执行的批次'
+        }));
+        return;
+    }
+
+    if (activeBatch.status !== 'paused') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+            code: 400,
+            message: '当前批次未处于暂停状态'
+        }));
+        return;
+    }
+
+    batchState.isPaused = false;
+    db.updateBatchStatus(activeBatch.batch_id, 'running');
+    console.log(`[批量执行] 批次 ${activeBatch.batch_id} 已恢复`);
+
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+        code: 0,
+        message: '已恢复'
+    }));
+}
+
+// API: 停止批量执行
+function handleBatchStop(res) {
+    const activeBatch = db.getActiveBatch();
+    if (!activeBatch) {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+            code: 400,
+            message: '没有正在执行的批次'
+        }));
+        return;
+    }
+
+    batchState.shouldStop = true;
+    batchState.isPaused = false;
+    db.updateBatchStatus(activeBatch.batch_id, 'stopped');
+    console.log(`[批量执行] 批次 ${activeBatch.batch_id} 已停止`);
+
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+        code: 0,
+        message: '已停止',
+        data: {
+            completed_count: batchState.completedCount,
+            failed_count: batchState.failedCount
+        }
+    }));
 }
 
 startServer().catch(console.error);

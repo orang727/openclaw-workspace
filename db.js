@@ -83,7 +83,27 @@ function createTables() {
     try {
         db.run(`ALTER TABLE tasks ADD COLUMN exec_result TEXT`);
     } catch (e) {}
-    
+
+    // 批次执行进度表
+    db.run(`
+        CREATE TABLE IF NOT EXISTS batch_progress (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            batch_id TEXT NOT NULL UNIQUE,
+            total_count INTEGER DEFAULT 0,
+            completed_count INTEGER DEFAULT 0,
+            failed_count INTEGER DEFAULT 0,
+            current_index INTEGER DEFAULT 0,
+            status TEXT DEFAULT 'pending',
+            task_ids TEXT,
+            started_at TEXT,
+            updated_at TEXT DEFAULT (datetime('now')),
+            finished_at TEXT
+        )
+    `);
+
+    // 创建索引
+    db.run('CREATE INDEX IF NOT EXISTS idx_batch_progress_status ON batch_progress(status)');
+
     // 执行日志表
     db.run(`
         CREATE TABLE IF NOT EXISTS task_logs (
@@ -108,11 +128,29 @@ function createTables() {
             updated_at TEXT DEFAULT (datetime('now'))
         )
     `);
-    
+
+    // 批次执行进度表
+    db.run(`
+        CREATE TABLE IF NOT EXISTS batch_progress (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            batch_id TEXT NOT NULL UNIQUE,
+            total_count INTEGER DEFAULT 0,
+            completed_count INTEGER DEFAULT 0,
+            failed_count INTEGER DEFAULT 0,
+            current_index INTEGER DEFAULT 0,
+            status TEXT DEFAULT 'pending',
+            task_ids TEXT,
+            started_at TEXT,
+            updated_at TEXT DEFAULT (datetime('now')),
+            finished_at TEXT
+        )
+    `);
+
     // 创建索引
     db.run('CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)');
     db.run('CREATE INDEX IF NOT EXISTS idx_tasks_date ON tasks(date)');
     db.run('CREATE INDEX IF NOT EXISTS idx_task_logs_task_id ON task_logs(task_id)');
+    db.run('CREATE INDEX IF NOT EXISTS idx_batch_progress_status ON batch_progress(status)');
     
     saveDB();
     console.log('✅ 数据表创建完成');
@@ -311,6 +349,104 @@ function updateDailyStats(date, stats) {
     saveDB();
 }
 
+// ==================== 批次执行相关 ====================
+
+// 创建批次记录
+function createBatch(batchId, taskIds) {
+    const stmt = db.prepare(`
+        INSERT INTO batch_progress (batch_id, total_count, task_ids, status, started_at, updated_at)
+        VALUES (?, ?, ?, 'running', datetime('now'), datetime('now'))
+    `);
+    stmt.run([batchId, taskIds.length, JSON.stringify(taskIds)]);
+    stmt.free();
+    saveDB();
+}
+
+// 获取活跃批次
+function getActiveBatch() {
+    const stmt = db.prepare(`
+        SELECT * FROM batch_progress
+        WHERE status IN ('running', 'paused')
+        ORDER BY started_at DESC LIMIT 1
+    `);
+    let result = null;
+    if (stmt.step()) {
+        result = stmt.getAsObject();
+        if (result.task_ids) {
+            try {
+                result.task_ids = JSON.parse(result.task_ids);
+            } catch (e) {
+                result.task_ids = [];
+            }
+        }
+    }
+    stmt.free();
+    return result;
+}
+
+// 获取批次状态
+function getBatchStatus(batchId) {
+    const stmt = db.prepare('SELECT * FROM batch_progress WHERE batch_id = ?');
+    stmt.bind([batchId]);
+    let result = null;
+    if (stmt.step()) {
+        result = stmt.getAsObject();
+        if (result.task_ids) {
+            try {
+                result.task_ids = JSON.parse(result.task_ids);
+            } catch (e) {
+                result.task_ids = [];
+            }
+        }
+    }
+    stmt.free();
+    return result;
+}
+
+// 更新批次进度
+function updateBatchProgress(batchId, currentIndex, completedCount, failedCount) {
+    const stmt = db.prepare(`
+        UPDATE batch_progress
+        SET current_index = ?, completed_count = ?, failed_count = ?, updated_at = datetime('now')
+        WHERE batch_id = ?
+    `);
+    stmt.run([currentIndex, completedCount, failedCount, batchId]);
+    stmt.free();
+    saveDB();
+}
+
+// 更新批次状态
+function updateBatchStatus(batchId, status) {
+    const stmt = db.prepare(`
+        UPDATE batch_progress
+        SET status = ?, updated_at = datetime('now'), finished_at = CASE WHEN ? IN ('completed', 'stopped') THEN datetime('now') ELSE finished_at END
+        WHERE batch_id = ?
+    `);
+    stmt.run([status, status, batchId]);
+    stmt.free();
+    saveDB();
+}
+
+// 更新批次剩余任务列表
+function updateBatchTaskIds(batchId, taskIds) {
+    const stmt = db.prepare(`
+        UPDATE batch_progress
+        SET task_ids = ?, updated_at = datetime('now')
+        WHERE batch_id = ?
+    `);
+    stmt.run([JSON.stringify(taskIds), batchId]);
+    stmt.free();
+    saveDB();
+}
+
+// 删除批次记录
+function deleteBatch(batchId) {
+    const stmt = db.prepare('DELETE FROM batch_progress WHERE batch_id = ?');
+    stmt.run([batchId]);
+    stmt.free();
+    saveDB();
+}
+
 // 计算每日统计
 function calcDailyStats(date) {
     const tasks = getTasks({ date });
@@ -357,5 +493,13 @@ module.exports = {
     updateDailyStats,
     calcDailyStats,
     getCities,
-    closeDB
+    closeDB,
+    // 批次执行相关
+    createBatch,
+    getActiveBatch,
+    getBatchStatus,
+    updateBatchProgress,
+    updateBatchStatus,
+    updateBatchTaskIds,
+    deleteBatch
 };
