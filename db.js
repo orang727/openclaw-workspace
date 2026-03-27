@@ -171,37 +171,81 @@ function getDB() {
 
 // 插入任务 - 使用INSERT OR REPLACE基于track_id去重
 function insertTask(task) {
-    const stmt = db.prepare(`
-        INSERT OR REPLACE INTO tasks (track_id, track_content_id, task_type, city, city_id, create_time, intent_content, intent_category, confidence, status, exec_status, exec_action, exec_result, complete_time, mode, date, reason_name, track_type_name, track_level_name, work_id, promoter, operate_remark)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    stmt.run([
-        task.track_id,
-        task.track_content_id || '',
-        task.task_type || '申请挂起',
-        task.city || '',
-        task.city_id || '',
-        task.create_time,
-        task.intent_content || '',
-        task.intent_category || '',
-        task.confidence || '',
-        task.status,
-        task.exec_status || '等待中',
-        task.exec_action || '',
-        task.exec_result || '',
-        task.complete_time || '',
-        task.mode || 'manual',
-        task.date || '',
-        task.reason_name || '',
-        task.track_type_name || '',
-        task.track_level_name || '',
-        task.work_id || '',
-        task.promoter || '',
-        task.operate_remark || ''
-    ]);
+    // 先检查是否存在
+    const existing = getTaskById(task.track_id);
+
+    let sql;
+    let params;
+
+    if (existing) {
+        // 已存在则更新
+        sql = `UPDATE tasks SET
+            track_content_id = ?, task_type = ?, city = ?, city_id = ?,
+            create_time = ?, intent_content = ?, intent_category = ?, confidence = ?,
+            status = ?, exec_status = ?, exec_action = ?, exec_result = ?,
+            complete_time = ?, mode = ?, date = ?, reason_name = ?,
+            track_type_name = ?, track_level_name = ?, work_id = ?,
+            promoter = ?, operate_remark = ?
+            WHERE track_id = ?`;
+        params = [
+            task.track_content_id || '',
+            task.task_type || '申请挂起',
+            task.city || '',
+            task.city_id || '',
+            task.create_time || '',
+            task.intent_content || '',
+            task.intent_category || '',
+            task.confidence || '',
+            task.status || 'pending',
+            task.exec_status || '等待中',
+            task.exec_action || '',
+            task.exec_result || '',
+            task.complete_time || '',
+            task.mode || 'manual',
+            task.date || '',
+            task.reason_name || '',
+            task.track_type_name || '',
+            task.track_level_name || '',
+            task.work_id || '',
+            task.promoter || '',
+            task.operate_remark || '',
+            task.track_id
+        ];
+    } else {
+        // 不存在则插入
+        sql = `INSERT INTO tasks (track_id, track_content_id, task_type, city, city_id, create_time, intent_content, intent_category, confidence, status, exec_status, exec_action, exec_result, complete_time, mode, date, reason_name, track_type_name, track_level_name, work_id, promoter, operate_remark)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+        params = [
+            task.track_id,
+            task.track_content_id || '',
+            task.task_type || '申请挂起',
+            task.city || '',
+            task.city_id || '',
+            task.create_time || '',
+            task.intent_content || '',
+            task.intent_category || '',
+            task.confidence || '',
+            task.status || 'pending',
+            task.exec_status || '等待中',
+            task.exec_action || '',
+            task.exec_result || '',
+            task.complete_time || '',
+            task.mode || 'manual',
+            task.date || '',
+            task.reason_name || '',
+            task.track_type_name || '',
+            task.track_level_name || '',
+            task.work_id || '',
+            task.promoter || '',
+            task.operate_remark || ''
+        ];
+    }
+
+    const stmt = db.prepare(sql);
+    stmt.run(params);
     stmt.free();
     saveDB();
-    return db.exec('SELECT last_insert_rowid() as id')[0].values[0][0];
+    return existing ? existing.id : db.exec('SELECT last_insert_rowid() as id')[0].values[0][0];
 }
 
 // 插入日志

@@ -237,6 +237,12 @@ async function startServer() {
                         let count = 0;
                         for (const item of data) {
                             try {
+                                // 跳过无效数据
+                                if (!item.trackWorkId) {
+                                    console.log('[同步] 跳过无效数据，缺少trackWorkId:', JSON.stringify(item).substring(0, 200));
+                                    continue;
+                                }
+
                                 // 解析日期格式 "03-25 12:55" 转换为 "2026-03-25"
                                 let dateStr = '';
                                 if (item.createTime && item.createTime.includes('-')) {
@@ -245,7 +251,7 @@ async function startServer() {
                                         dateStr = '2026-' + parts[0]; // "2026-03-25"
                                     }
                                 }
-                                
+
                                 // 映射字段
                                 const task = {
                                     track_id: String(item.trackWorkId),
@@ -272,7 +278,7 @@ async function startServer() {
                                 db.insertTask(task);
                                 count++;
                             } catch (e) {
-                                console.error('插入失败:', e.message);
+                                console.error('[同步] 插入失败:', e.message, '数据:', JSON.stringify(item).substring(0, 200));
                             }
                         }
                         
@@ -326,7 +332,12 @@ async function startServer() {
 
             // 开始批量执行
             if (pathname === '/api/batch/start' && req.method === 'POST') {
-                handleBatchStart(res);
+                let body = '';
+                req.on('data', chunk => body += chunk);
+                req.on('end', () => {
+                    const params = body ? JSON.parse(body) : {};
+                    handleBatchStart(res, params.taskIds);
+                });
                 return;
             }
 
@@ -705,7 +716,7 @@ function handleBatchPreview(res) {
 }
 
 // API: 开始批量执行
-function handleBatchStart(res) {
+function handleBatchStart(res, specifiedTaskIds = null) {
     // 检查是否已有批次在运行
     const activeBatch = db.getActiveBatch();
     if (activeBatch) {
@@ -717,27 +728,36 @@ function handleBatchStart(res) {
         return;
     }
 
-    // 获取待处理任务
-    const pendingTasks = db.getTasks({ status: 'pending' });
-    if (pendingTasks.length === 0) {
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({
-            code: 400,
-            message: '没有待处理的任务'
-        }));
-        return;
-    }
+    let taskIds;
 
-    // 按发起时间正序
-    pendingTasks.sort((a, b) => {
-        const timeA = new Date('2026-' + a.create_time);
-        const timeB = new Date('2026-' + b.create_time);
-        return timeA - timeB;
-    });
+    if (specifiedTaskIds && specifiedTaskIds.length > 0) {
+        // 使用指定的任务ID列表
+        taskIds = specifiedTaskIds;
+        console.log(`[批量执行] 使用指定任务列表，共 ${taskIds.length} 个`);
+    } else {
+        // 获取所有待处理任务
+        const pendingTasks = db.getTasks({ status: 'pending' });
+        if (pendingTasks.length === 0) {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+                code: 400,
+                message: '没有待处理的任务'
+            }));
+            return;
+        }
+
+        // 按发起时间正序
+        pendingTasks.sort((a, b) => {
+            const timeA = new Date('2026-' + a.create_time);
+            const timeB = new Date('2026-' + b.create_time);
+            return timeA - timeB;
+        });
+
+        taskIds = pendingTasks.map(t => t.track_id);
+    }
 
     // 生成批次ID
     const batchId = generateBatchId();
-    const taskIds = pendingTasks.map(t => t.track_id);
 
     // 创建批次记录
     db.createBatch(batchId, taskIds);

@@ -187,7 +187,7 @@
         }
         .task-header {
             display: grid;
-            grid-template-columns: 1.6fr 0.6fr 0.5fr 0.8fr 0.7fr 0.9fr 0.5fr 0.4fr 1.5fr 0.8fr 70px;
+            grid-template-columns: 40px 1.6fr 0.6fr 0.5fr 0.8fr 0.7fr 0.9fr 0.5fr 0.4fr 1.5fr 0.8fr 70px;
             padding: 12px 16px;
             background: #f8f9fa;
             font-weight: 600;
@@ -200,7 +200,7 @@
         }
         .task-item {
             display: grid;
-            grid-template-columns: 1.6fr 0.6fr 0.5fr 0.8fr 0.7fr 0.9fr 0.5fr 0.4fr 1.5fr 0.8fr 70px;
+            grid-template-columns: 40px 1.6fr 0.6fr 0.5fr 0.8fr 0.7fr 0.9fr 0.5fr 0.4fr 1.5fr 0.8fr 70px;
             padding: 12px 16px;
             border-bottom: 1px solid #f0f0f0;
             font-size: 12px;
@@ -224,6 +224,29 @@
         .task-id {
             color: #888;
             font-family: monospace;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .copy-btn {
+            padding: 2px 6px;
+            font-size: 10px;
+            border: 1px solid #ddd;
+            border-radius: 3px;
+            background: #f5f5f5;
+            color: #666;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .copy-btn:hover {
+            background: #667eea;
+            color: #fff;
+            border-color: #667eea;
+        }
+        .copy-btn.copied {
+            background: #4ec9b0;
+            color: #fff;
+            border-color: #4ec9b0;
         }
         .task-time {
             color: #888;
@@ -644,7 +667,7 @@
                     <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 15px;">
                         <div class="date-picker" style="margin-bottom: 0;">
                             <label>发起日期：</label>
-                            <input type="date" id="list-date" value="2026-03-25" style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+                            <input type="date" id="list-date" style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
                         </div>
                         <div style="display: flex; align-items: center; gap: 8px;">
                             <label>跟单内容：</label>
@@ -676,6 +699,7 @@
                             <button class="filter-btn" onclick="filterTasks('error', this)">异常</button>
                         </div>
                         <div class="mode-toggle">
+                            <button class="mode-btn" id="btn-batch" onclick="showBatchConfirm()">批量处理</button>
                             <button class="mode-btn" id="btn-auto" onclick="showAutoConfirm()">自动执行</button>
                             <button class="mode-btn active" id="btn-manual" onclick="setMode('manual')">手动执行</button>
                         </div>
@@ -709,6 +733,7 @@
                 <div class="content-area">
                     <div class="task-list">
                         <div class="task-header">
+                            <span><input type="checkbox" id="select-all" onchange="toggleSelectAll()"></span>
                             <span>跟单ID</span>
                             <span>跟单内容</span>
                             <span>城市</span>
@@ -883,6 +908,88 @@
         let currentMode = 'manual';
         let selectedTaskId = null;
         let batchPollInterval = null;
+        let selectedTaskIds = new Set(); // 选中的任务ID集合
+
+        // 复制到剪贴板
+        function copyToClipboard(text, btn) {
+            navigator.clipboard.writeText(text).then(() => {
+                btn.textContent = '已复制';
+                btn.classList.add('copied');
+                setTimeout(() => {
+                    btn.textContent = '复制';
+                    btn.classList.remove('copied');
+                }, 1500);
+            }).catch(err => {
+                console.error('复制失败:', err);
+            });
+        }
+
+        // 切换全选
+        function toggleSelectAll() {
+            const checkbox = document.getElementById('select-all');
+            if (checkbox.checked) {
+                // 全选所有待处理任务
+                tasks.filter(t => t.status === 'pending').forEach(t => selectedTaskIds.add(t.track_id));
+            } else {
+                selectedTaskIds.clear();
+            }
+            updateSelectedCount();
+            renderTaskList();
+        }
+
+        // 切换单个选中
+        function toggleSelect(taskId, event) {
+            event.stopPropagation();
+            if (selectedTaskIds.has(taskId)) {
+                selectedTaskIds.delete(taskId);
+            } else {
+                selectedTaskIds.add(taskId);
+            }
+            updateSelectAllCheckbox();
+            updateSelectedCount();
+            renderTaskList();
+        }
+
+        // 更新全选复选框状态
+        function updateSelectAllCheckbox() {
+            const pendingTasks = tasks.filter(t => t.status === 'pending');
+            const selectAll = document.getElementById('select-all');
+            if (selectAll) {
+                selectAll.checked = pendingTasks.length > 0 && pendingTasks.every(t => selectedTaskIds.has(t.track_id));
+            }
+        }
+
+        // 更新选中数量显示
+        function updateSelectedCount() {
+            const count = selectedTaskIds.size;
+            let countDisplay = document.getElementById('selected-count');
+            if (!countDisplay && count > 0) {
+                // 创建数量显示元素
+                const modeToggle = document.querySelector('.mode-toggle');
+                countDisplay = document.createElement('span');
+                countDisplay.id = 'selected-count';
+                countDisplay.style.cssText = 'margin-left: 8px; padding: 8px 12px; background: #667eea; color: #fff; border-radius: 4px; font-size: 13px;';
+                modeToggle.parentNode.insertBefore(countDisplay, modeToggle.nextSibling);
+            }
+            if (countDisplay) {
+                countDisplay.textContent = `已选 ${count} 条`;
+                countDisplay.style.display = count > 0 ? 'inline-block' : 'none';
+            }
+        }
+
+        // 显示批量处理确认弹窗
+        function showBatchConfirm() {
+            if (selectedTaskIds.size === 0) {
+                alert('请先选择要处理的跟单');
+                return;
+            }
+
+            const count = selectedTaskIds.size;
+            document.getElementById('modal-total-count').textContent = count + ' 条';
+            document.getElementById('modal-batch-count').textContent = Math.ceil(count / 100) + ' 批';
+            document.getElementById('modal-est-time').textContent = `${Math.round(count * 20 / 60)} 分钟`;
+            document.getElementById('auto-confirm-modal').classList.remove('hidden');
+        }
 
         // 显示自动执行确认弹窗
         async function showAutoConfirm() {
@@ -917,8 +1024,18 @@
             btn.textContent = '启动中...';
 
             try {
-                const res = await fetch(`${API_BASE}/batch/start`, {
-                    method: 'POST'
+                let url = `${API_BASE}/batch/start`;
+                let body = {};
+
+                // 如果有选中任务，使用批量处理
+                if (selectedTaskIds.size > 0) {
+                    body = { taskIds: Array.from(selectedTaskIds) };
+                }
+
+                const res = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
                 });
                 const result = await res.json();
 
@@ -927,6 +1044,10 @@
                     document.getElementById('batch-status-panel').style.display = 'block';
                     setMode('auto');
                     startBatchPolling();
+                    // 清空选中
+                    selectedTaskIds.clear();
+                    updateSelectedCount();
+                    renderTaskList();
                 } else {
                     alert('启动失败: ' + result.message);
                 }
@@ -1186,10 +1307,16 @@
                 container.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📋</div><div>暂无数据</div></div>';
                 return;
             }
-            
+
             container.innerHTML = tasks.map(task => `
                 <div class="task-item ${selectedTaskId === task.track_id ? 'selected' : ''}" onclick="selectTask('${task.track_id}')">
-                    <div class="task-id">${task.track_id}</div>
+                    <div onclick="toggleSelect('${task.track_id}', event)">
+                        <input type="checkbox" ${selectedTaskIds.has(task.track_id) ? 'checked' : ''} ${task.status !== 'pending' ? 'disabled' : ''}>
+                    </div>
+                    <div class="task-id">
+                        <span title="${task.track_id}">${task.track_id.substring(0, 12)}...</span>
+                        <button class="copy-btn" onclick="event.stopPropagation(); copyToClipboard('${task.track_id}', this)">复制</button>
+                    </div>
                     <div class="task-type">${task.task_type || '申请挂起'}</div>
                     <div class="task-city">${task.city || '—'}</div>
                     <div class="task-time">${task.create_time}</div>
@@ -1208,11 +1335,15 @@
                     </div>
                 </div>
             `).join('');
-            
+
             // 默认选中第一个
             if (tasks.length > 0 && !selectedTaskId) {
                 await selectTask(tasks[0].track_id);
             }
+
+            // 更新全选复选框
+            updateSelectAllCheckbox();
+            updateSelectedCount();
         }
         
         // 获取状态文本
@@ -1444,7 +1575,7 @@
                     }
                     resultContent.innerHTML = `
                         <div style="margin-bottom: 15px;">✅ 查询成功！共 ${result.data.total} 条数据，请确认后点击"同步"按钮</div>
-                        <div style="max-height: 300px; overflow-y: auto;">
+                        <div style="overflow-y: auto;">
                             <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
                                 <tr style="background: #f5f5f5;">
                                     <th style="padding: 8px; border: 1px solid #ddd;">跟单ID</th>
@@ -1452,7 +1583,7 @@
                                     <th style="padding: 8px; border: 1px solid #ddd;">状态</th>
                                     <th style="padding: 8px; border: 1px solid #ddd;">发起时间</th>
                                 </tr>
-                                ${queryResultData.slice(0, 20).map(item => `
+                                ${queryResultData.map(item => `
                                     <tr>
                                         <td style="padding: 8px; border: 1px solid #ddd;">${item.trackWorkId || '-'}</td>
                                         <td style="padding: 8px; border: 1px solid #ddd;">${item.trackContent || '-'}</td>
@@ -1460,7 +1591,6 @@
                                         <td style="padding: 8px; border: 1px solid #ddd;">${item.createTime || '-'}</td>
                                     </tr>
                                 `).join('')}
-                                ${queryResultData.length > 20 ? `<tr><td colspan="4" style="padding: 8px; text-align: center; color: #666;">...还有 ${queryResultData.length - 20} 条未显示</td></tr>` : ''}
                             </table>
                         </div>
                     `;
@@ -1548,8 +1678,13 @@
             }
             logContainer.innerHTML = html || '<div class="log-entry"><span class="log-info">暂无日志</span></div>';
         }
-        
+
         // 初始化
+        // 设置发起日期为今天
+        const today = new Date();
+        const todayStr = today.toISOString().split('T')[0];
+        document.getElementById('list-date').value = todayStr;
+
         updateMonitorData();
         renderTaskList();
         loadCities();
